@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode
+#
+## User-specific files
+*.xcuserdatad
+*.xcschememanagement
+*.userstate
+
+## Build generated
+build/
+DerivedData/
+
+## Other
+*.hmap
+*.ipa
+*.dsym
