@@ -1,62 +1,68 @@
 import SwiftUI
 
+enum ZoomSection: CaseIterable {
+    case none
+    case hallA
+    case hallB 
+    case hallC
+    
+    var title: String {
+        switch self {
+        case .none: return "All Halls"
+        case .hallA: return "Hall A"
+        case .hallB: return "Hall B"
+        case .hallC: return "Hall C"
+        }
+    }
+    
+    var hall: Hall? {
+        switch self {
+        case .none: return nil
+        case .hallA: return .hallA
+        case .hallB: return .hallB
+        case .hallC: return .hallC
+        }
+    }
+}
+
 struct EventMapView: View {
     @StateObject private var crowdData = CrowdData()
     @State private var pathfinding: EventMapPathfinding?
     
-    @State private var selectedStartBooth: Booth?
-    @State private var selectedStartPosition: GridPosition?
-    @State private var selectedEndBooth: Booth?
-    @State private var highlightedAccessPoints: [GridPosition] = []
-    
-    @State private var currentPath: [GridPosition] = []
-    @State private var currentCheckpointIndex: Int = 0
-    
-    // Properti tampilan peta
+    // Zoom and section properties
+    @State private var zoomedSection: ZoomSection = .none
     @State private var scale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     
     private let gridSize: CGFloat = 40
-    private let mapWidth: Int32 = 20
-    private let mapHeight: Int32 = 16
+    private let totalMapWidth: Int = 12  // Use the largest hall width
+    private let totalMapHeight: Int = 22 // Sum of all hall heights
     
     // MARK: - Body
     var body: some View {
         ZStack {
-            // map ui
+            // Map layer
             mapContent
-                .scaleEffect(scale)
-                .gesture(
-                    SimultaneousGesture(
-                        // gesture -> pinch in out zoom
-                        MagnificationGesture()
-                            .onChanged { value in
-                                scale = max(0.5, min(3.0, value))
-                            },
-                        
-                        // Drag -> Geser jari
-                        DragGesture()
-                            .onChanged { value in
-                                // posisi geser sementara saat jari bergerak
-                                offset = value.translation
-                            }
-                        
-                        // posisi geser permanen saat jari udah ga gerakin
-                            .onEnded { value in
-                                lastOffset.width += offset.width
-                                lastOffset.height += offset.height
-                                offset = .zero
-                            }
-                    )
-                )
+                .scaleEffect(currentScale)
+                .offset(currentOffset)
+                .gesture(mapGestures)
             
+            // UI Controls
             VStack {
+                // Top: Hall selector
                 HStack {
-                    controlPanel
-                        .offset(x : -10)
+                    Spacer()
+                    hallSelector
+                    Spacer()
                 }
+                
                 Spacer()
+                
+                // Bottom: Map controls
+                if case .none = zoomedSection {
+                    mapControlPanel
+                }
             }
             .padding()
         }
@@ -65,355 +71,284 @@ struct EventMapView: View {
             setupPathfinding()
         }
     }
-
-    // Map Content Views
+    
+    // Computed properties for current scale and offset
+    private var currentScale: CGFloat {
+        if case .none = zoomedSection {
+            return scale
+        } else {
+            return scale * 1.5 // Zoom into the selected hall while keeping user's zoom level
+        }
+    }
+    
+    private var currentOffset: CGSize {
+        if case .none = zoomedSection {
+            return CGSize(width: lastOffset.width + offset.width, 
+                         height: lastOffset.height + offset.height)
+        } else {
+            // Calculate offset to center the selected hall, but keep drag functionality
+            let yOffset: CGFloat = {
+                switch zoomedSection {
+                case .hallC: return 150   // Move up to show Hall C
+                case .hallB: return 0     // Center for Hall B
+                case .hallA: return -150  // Move down to show Hall A
+                default: return 0
+                }
+            }()
+            // Allow dragging while zoomed into a hall
+            return CGSize(width: lastOffset.width + offset.width, 
+                         height: lastOffset.height + offset.height + yOffset)
+        }
+    }
+    
+    // Map content
     private var mapContent: some View {
         ZStack {
-            
-            // Konten2 yang ada dalem peta
-            gridBackground // -> Grid abu abu putih kotak2
-            crowdHeatmap // -> Warna merah transparant, crowd heatmap masih ngasal
-            accessPointsHighlightView // Titik akses booth awal
-            boothsView // -> Visualisasi booth
-            pathView // -> Jalur dari start - end
+            hallGrids
+            hallLabels
+            hallDividers
         }
-        .frame(width: CGFloat(mapWidth) * gridSize, height: CGFloat(mapHeight) * gridSize)
-    }
-
-    private var gridBackground: some View {
-        VStack(spacing: 0) {
-            ForEach(0..<Int(mapHeight), id: \.self) { y in
-                HStack(spacing: 0) {
-                    ForEach(0..<Int(mapWidth), id: \.self) { x in
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: gridSize, height: gridSize)
-                            .border(Color.gray.opacity(0.2), width: 0.5)
-                    }
-                }
-            }
-        }
-    }
-
-    private var crowdHeatmap: some View {
-        
-        ForEach(Array(crowdData.crowdLevels.keys), id: \.self) { position in
-            let crowdLevel = crowdData.getCrowdLevel(at: position)
-            Rectangle()
-                .fill(Color.red.opacity(Double(crowdLevel * 0.5)))
-                .frame(width: gridSize, height: gridSize)
-                .position(x: CGFloat(position.x) * gridSize + gridSize/2,
-                          y: CGFloat(position.y) * gridSize + gridSize/2)
-        }
+        .frame(width: CGFloat(totalMapWidth) * gridSize, 
+               height: CGFloat(totalMapHeight) * gridSize)
     }
     
-    private var accessPointsHighlightView: some View {
-        
-        // Di sini ada selected start point, hijau bisa klik untuk mulai & kalau udah di klik tapi blom cari rute dia warnanya jadi kuning
-        
-        ZStack {
-            ForEach(highlightedAccessPoints, id: \.self) { pos in
-               
-                let isSelectedPoint = (pos == selectedStartPosition)
-                
-                Rectangle()
-                    .fill(isSelectedPoint ? Color.yellow.opacity(0.7) : Color.green.opacity(0.6))
-                    .overlay(
-                        Rectangle()
-                            .stroke(isSelectedPoint ? Color.orange : Color.clear, lineWidth: 2)
-                    )
-                    .frame(width: gridSize, height: gridSize)
-                    .position(point(for: pos))
-                    .onTapGesture {
-                        selectStartPosition(pos)
-                    }
-            }
-        }
-    }
-
-    private var boothsView: some View {
+    // Hall grids
+    private var hallGrids: some View {
         ZStack {
             if let pathfinding = pathfinding {
-                ForEach(pathfinding.getBooths(), id: \.id) { booth in
-                    boothView(booth)
+                ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
+                    hallGrid(config: config)
                 }
             }
         }
     }
-
-    private func boothView(_ booth: Booth) -> some View {
-        let size = booth.size == .large ? gridSize * 2 : gridSize
-        
-        let isStagedForStart = selectedStartBooth?.id == booth.id && selectedStartPosition == nil
-        let isEnd = selectedEndBooth?.id == booth.id
-        
-        let color: Color = {
-            if isEnd { return .red }
-            if isStagedForStart { return .green }
-            if selectedStartBooth?.id == booth.id && selectedStartPosition != nil { return .blue }
-            return .blue
-        }()
-        
-        let occupiedPositions = pathfinding?.getBoothOccupiedPositions(booth) ?? [booth.gridPosition]
-        let boothCenterX = CGFloat(occupiedPositions.map { $0.x }.reduce(0, +)) / CGFloat(occupiedPositions.count)
-        let boothCenterY = CGFloat(occupiedPositions.map { $0.y }.reduce(0, +)) / CGFloat(occupiedPositions.count)
-        
-        let position = CGPoint(
-            x: (boothCenterX * gridSize) + (booth.size == .large ? gridSize : gridSize / 2),
-            y: (boothCenterY * gridSize) + (booth.size == .large ? gridSize : gridSize / 2)
-        )
-
-        return RoundedRectangle(cornerRadius: 8)
-            .fill(color.opacity(0.8))
-            .frame(width: size, height: size)
-            .overlay(
-                VStack {
-                    Text(booth.name)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
+    
+    // Individual hall grid
+    private func hallGrid(config: EventMapPathfinding.HallConfig) -> some View {
+        VStack(spacing: 0) {
+            ForEach(config.yStart...config.yEnd, id: \.self) { y in
+                HStack(spacing: 0) {
+                    // Center the hall horizontally
+                    let leftPadding = (totalMapWidth - config.width) / 2
                     
-                    if booth.hasBeacon {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .foregroundColor(.white)
-                            .font(.caption2)
+                    // Left padding to center the hall
+                    ForEach(0..<leftPadding, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(width: gridSize, height: gridSize)
+                    }
+                    
+                    // Actual hall content
+                    ForEach(0..<config.width, id: \.self) { x in
+                        Rectangle()
+                            .fill(hallBackgroundColor(for: config.hall))
+                            .frame(width: gridSize, height: gridSize)
+                            .border(Color.gray.opacity(0.3), width: 0.5)
+                            .opacity(hallOpacity(for: config.hall))
+                    }
+                    
+                    // Right padding to center the hall
+                    ForEach((leftPadding + config.width)..<totalMapWidth, id: \.self) { _ in
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(width: gridSize, height: gridSize)
                     }
                 }
-                .padding(2)
-            )
-            .position(position)
-            .onTapGesture {
-                selectBooth(booth)
             }
+        }
+        .position(x: CGFloat(totalMapWidth) * gridSize / 2,
+                  y: CGFloat(config.yStart + config.yEnd) * gridSize / 2)
     }
     
-    private var pathView: some View {
-        // jalur dari start ke tujuan
-        // visited -> abu | jalur belum dilalui -> garis biru putus | titik belok -> check point
+    // Hall labels
+    private var hallLabels: some View {
         ZStack {
-            if !currentPath.isEmpty && currentCheckpointIndex > 0 {
-                Path { path in
-                    let visitedPath = Array(currentPath[0...currentCheckpointIndex])
-                    let firstPoint = point(for: visitedPath[0])
-                    path.move(to: firstPoint)
-                    for position in visitedPath.dropFirst() {
-                        path.addLine(to: point(for: position))
+            if let pathfinding = pathfinding {
+                ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
+                    if shouldShowHall(config.hall) {
+                        Text(config.hall.rawValue)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                            .padding(8)
+                            .background(.thinMaterial)
+                            .cornerRadius(8)
+                            .position(x: CGFloat(totalMapWidth) * gridSize / 2, // Center horizontally
+                                      y: CGFloat(config.yStart + 1) * gridSize)
                     }
                 }
-                .stroke(Color.gray, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
-            
-            if !currentPath.isEmpty && currentCheckpointIndex < currentPath.count - 1 {
-                Path { path in
-                    let upcomingPath = Array(currentPath[currentCheckpointIndex...])
-                    let firstPoint = point(for: upcomingPath[0])
-                    path.move(to: firstPoint)
-                    for position in upcomingPath.dropFirst() {
-                        path.addLine(to: point(for: position))
-                    }
-                }
-                .stroke(Color.blue, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round, dash: [10, 5]))
+        }
+    }
+    
+    // Hall dividers
+    private var hallDividers: some View {
+        ZStack {
+            if case .none = zoomedSection {
+                // Divider between Hall C and Hall B (after Hall C ends)
+                Rectangle()
+                    .fill(Color.black.opacity(0.4))
+                    .frame(width: CGFloat(totalMapWidth) * gridSize, height: 3)
+                    .position(x: CGFloat(totalMapWidth) * gridSize / 2, 
+                             y: CGFloat(8) * gridSize - 1.5) // Position between halls
+                
+                // Divider between Hall B and Hall A (after Hall B ends)
+                Rectangle()
+                    .fill(Color.black.opacity(0.4))
+                    .frame(width: CGFloat(totalMapWidth) * gridSize, height: 3)
+                    .position(x: CGFloat(totalMapWidth) * gridSize / 2, 
+                             y: CGFloat(16) * gridSize - 1.5) // Position between halls
             }
-            
-            ForEach(Array(currentPath.enumerated()), id: \.offset) { index, position in
-                if isTurningPoint(at: index, in: currentPath) {
-                    let isCurrentCheckpoint = (index == currentCheckpointIndex)
-                    let hasBeenVisited = (index < currentCheckpointIndex)
-                    
-                    Circle()
-                        .fill(hasBeenVisited ? Color.gray : Color.blue)
-                        .frame(width: isCurrentCheckpoint ? 18 : 12, height: isCurrentCheckpoint ? 18 : 12)
-                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                        .shadow(radius: 3)
-                        .position(point(for: position))
-                        .onTapGesture {
-                            withAnimation(.spring()) {
-                                currentCheckpointIndex = index
-                            }
+        }
+    }
+    
+    // Hall background colors
+    private func hallBackgroundColor(for hall: Hall) -> Color {
+        switch hall {
+        case .hallC: return Color.orange.opacity(0.1)   // Hall C (Top)
+        case .hallB: return Color.green.opacity(0.1)    // Hall B (Middle)
+        case .hallA: return Color.blue.opacity(0.1)     // Hall A (Bottom)
+        }
+    }
+    
+    // Check if hall should be shown based on zoom
+    private func shouldShowHall(_ hall: Hall) -> Bool {
+        return true // Always show all halls
+    }
+    
+    // Add this missing function
+    private func hallOpacity(for hall: Hall) -> Double {
+        switch zoomedSection {
+        case .none: return 1.0
+        case .hallA: return hall == .hallA ? 1.0 : 0.3
+        case .hallB: return hall == .hallB ? 1.0 : 0.3
+        case .hallC: return hall == .hallC ? 1.0 : 0.3
+        }
+    }
+    
+    // Hall selector
+    private var hallSelector: some View {
+        Menu {
+            ForEach(ZoomSection.allCases, id: \.self) { section in
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        if section == .none {
+                            // Reset everything when selecting "All Halls"
+                            scale = 1.0
+                            lastOffset = .zero
+                            offset = .zero
+                            zoomedSection = .none
+                        } else {
+                            // Reset the pan offset when selecting a specific hall
+                            lastOffset = .zero
+                            offset = .zero
+                            zoomedSection = section
                         }
+                    }
+                }) {
+                    HStack {
+                        Text(section.title)
+                        if zoomedSection == section {
+                            Image(systemName: "checkmark")
+                        }
+                    }
                 }
             }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "building.2")
+                    .font(.system(size: 18))
+                Text(zoomedSection.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.thinMaterial)
+            .cornerRadius(20)
+            .shadow(radius: 3)
         }
     }
-
-    // Control Panels -> Mulai ... Tujuan ... -> Menghitung jalur & reset semua pilihan & map
-    private var controlPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Navigasi Event")
-                    .font(.headline)
-                
-                VStack(alignment: .leading) {
-                    Text("Mulai: \(startPointText())")
-                        .foregroundColor(selectedStartPosition == nil ? .gray : .primary)
-                    Text("Tujuan: \(selectedEndBooth?.name ?? "Pilih booth tujuan")")
-                        .foregroundColor(selectedEndBooth == nil ? .gray : .primary)
-                }
-                .font(.subheadline)
-                
-                HStack {
-                    Button("Cari Rute") {
-                        calculateRoute()
-                    }
-                    .disabled(selectedStartPosition == nil || selectedEndBooth == nil)
-                    .buttonStyle(.borderedProminent)
-                    
-                    Button("Bersihkan") {
-                        clearSelection()
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.gray)
-                }
+    
+    // Map controls
+    private var mapControlPanel: some View {
+        HStack(spacing: 16) {
+            Button(action: resetMapPosition) { 
+                Image(systemName: "house.fill")
+                    .font(.system(size: 18))
             }
             
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Kontrol Peta").font(.headline)
-                HStack {
-                    Button(action: resetMapPosition) { Image(systemName: "house.fill") } // reset zoom & posisi
-                    Button(action: zoomIn) { Image(systemName: "plus.magnifyingglass") } // zoom in
-                    Button(action: zoomOut) { Image(systemName: "minus.magnifyingglass") } // zoom out
-                }
-                .buttonStyle(.bordered)
-                .tint(.secondary)
+            Button(action: zoomOut) { 
+                Image(systemName: "minus.magnifyingglass")
+                    .font(.system(size: 18))
+            }
+            
+            Button(action: zoomIn) { 
+                Image(systemName: "plus.magnifyingglass")
+                    .font(.system(size: 18))
             }
         }
-        .padding()
+        .buttonStyle(.bordered)
+        .tint(.secondary)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .background(.thinMaterial)
-        .cornerRadius(12)
-        .shadow(radius: 5)
+        .cornerRadius(20)
+        .shadow(radius: 3)
     }
-
-    // ubah posisi dalam bentuk koordinat grid jadi titik2 pixel real biar bisa ditampilkan di view
-    private func point(for position: GridPosition) -> CGPoint {
-        return CGPoint(
-            x: CGFloat(position.x) * gridSize + gridSize/2,
-            y: CGFloat(position.y) * gridSize + gridSize/2
+    
+    // Map gestures
+    private var mapGestures: some Gesture {
+        SimultaneousGesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    // Allow pinch zoom in all states
+                    scale = max(0.5, min(3.0, value))
+                },
+            
+            DragGesture()
+                .onChanged { value in
+                    // Allow dragging in all states
+                    offset = value.translation
+                }
+                .onEnded { value in
+                    // Update lastOffset in all states
+                    lastOffset.width += offset.width
+                    lastOffset.height += offset.height
+                    offset = .zero
+                }
         )
     }
     
-    // Menentukan apakah suatu jalur path adalah titik belok -> buat checkpoint
-    // Logika -> Ambil titik sebelumnya, saat ini, dan berikutnya
-    //      -> Lalu dihitung perbedaan arah dx dy dari dua segmen tadi
-    
-    private func isTurningPoint(at index: Int, in path: [GridPosition]) -> Bool {
-        if index == 0 || index == path.count - 1 { return true }
-        guard path.count >= 3 else { return false }
-        
-        let previous = path[index - 1]
-        let current = path[index]
-        let next = path[index + 1]
-        
-        let dx1 = current.x - previous.x
-        let dy1 = current.y - previous.y
-        let dx2 = next.x - current.x
-        let dy2 = next.y - current.y
-        
-        return dx1 != dx2 || dy1 != dy2
-    }
-    
-    // Menghasilkan teks berdasarkan status pemilihan titik awal untuk ditampilkan di panel kontrol
-    
-    private func startPointText() -> String {
-        if selectedStartPosition != nil {
-            return "Posisi Awal Terpilih"
-        }
-        if let startBooth = selectedStartBooth {
-            return "Pilih titik hijau dekat \(startBooth.name)"
-        }
-        return "Ketuk sebuah booth"
-    }
-    
-    // Membuat instance dari objek EventMapPathFinding, merupakan algo rute shortest path + crowd aware
+    // Setup pathfinding
     private func setupPathfinding() {
-        pathfinding = EventMapPathfinding(width: mapWidth, height: mapHeight, crowdData: crowdData)
-    }
-
-    // Logic buat clicking booth di maps
-    private func selectBooth(_ booth: Booth) {
-        if selectedStartPosition == nil {
-            if selectedStartBooth?.id == booth.id {
-                clearSelection()
-            } else {
-                selectedStartBooth = booth
-                selectedEndBooth = nil
-                clearPath()
-                
-                if let pf = pathfinding {
-                    highlightedAccessPoints = pf.findAccessPoints(for: booth)
-                }
-            }
-        }
-        else if booth.id != selectedStartBooth?.id {
-            withAnimation {
-                selectedEndBooth = booth
-            }
-        }
+        pathfinding = EventMapPathfinding(width: Int32(totalMapWidth), 
+                                         height: Int32(totalMapHeight), 
+                                         crowdData: crowdData)
     }
     
-    // Saat user click titik starting hijau -> dipilih sebagai starting point
-    private func selectStartPosition(_ position: GridPosition) {
-        withAnimation {
-            selectedStartPosition = position
-            // highlightedAccessPoints = [] // <-- BARIS INI DIHAPUS
-        }
-    }
-
-    // hitung shortest path dari starting - end route
-    private func calculateRoute() {
-        guard let startPos = selectedStartPosition,
-              let endBooth = selectedEndBooth,
-              let pathfinding = pathfinding else { return }
-        
-        let path = pathfinding.findPath(from: startPos, to: endBooth)
-        
-        withAnimation(.easeInOut(duration: 0.5)) {
-            currentPath = path
-            currentCheckpointIndex = 0
-            highlightedAccessPoints = [] // <-- BARIS INI DIPINDAHKAN KE SINI
-        }
-    }
-
-    // reset
-    private func clearSelection() {
-        withAnimation {
-            selectedStartBooth = nil
-            selectedStartPosition = nil
-            selectedEndBooth = nil
-            highlightedAccessPoints = []
-            clearPath()
-        }
-    }
-    
-    // hanya hapus path & checkpoint, bukan booth dipilih
-    private func clearPath() {
-        currentPath = []
-        currentCheckpointIndex = 0
-    }
-
-    // reset map position ke default habis di zoom zoom
+    // Map control functions
     private func resetMapPosition() {
         withAnimation(.easeInOut) {
             scale = 1.0
             offset = .zero
             lastOffset = .zero
+            zoomedSection = .none
         }
     }
-
-    // zoom in out
     
     private func zoomIn() {
         withAnimation(.easeInOut) {
             scale = min(3.0, scale * 1.3)
         }
     }
-
+    
     private func zoomOut() {
         withAnimation(.easeInOut) {
             scale = max(0.5, scale / 1.3)
         }
     }
 }
-
 
 #Preview {
     EventMapView()

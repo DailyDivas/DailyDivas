@@ -3,22 +3,23 @@
 import Foundation
 import SwiftUI
 
-struct Booth: Identifiable, Hashable {
-    let id = UUID()
-    let name: String
-    let gridPosition: GridPosition
-    let size: BoothSize
-    let hasBeacon: Bool
-    
-    enum BoothSize {
-        case small // 1x1
-        case large // 2x2
-    }
+enum Hall: String, CaseIterable {
+    case hallA = "Hall A"
+    case hallB = "Hall B" 
+    case hallC = "Hall C"
 }
 
 struct GridPosition: Hashable, Equatable {
     let x: Int
     let y: Int
+}
+
+// Basic structure for future booth implementation
+struct Booth: Identifiable, Hashable {
+    let id = UUID()
+    let name: String
+    let gridPosition: GridPosition
+    let hall: Hall
 }
 
 class CrowdData: ObservableObject {
