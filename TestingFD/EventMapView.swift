@@ -105,8 +105,9 @@ struct EventMapView: View {
     private var mapContent: some View {
         ZStack {
             hallGrids
+            boothsOverlay
             hallLabels
-            hallDividers
+            // hallDividers  // Remove this line to eliminate hall separators
         }
         .frame(width: CGFloat(totalMapWidth) * gridSize, 
                height: CGFloat(totalMapHeight) * gridSize)
@@ -128,36 +129,96 @@ struct EventMapView: View {
         VStack(spacing: 0) {
             ForEach(config.yStart...config.yEnd, id: \.self) { y in
                 HStack(spacing: 0) {
-                    // Center the hall horizontally
-                    let leftPadding = (totalMapWidth - config.width) / 2
-                    
-                    // Left padding to center the hall
-                    ForEach(0..<leftPadding, id: \.self) { _ in
+                    // Create a full-width row that matches the totalMapWidth
+                    ForEach(0..<totalMapWidth, id: \.self) { x in
                         Rectangle()
-                            .fill(Color.clear)
+                            .fill(isValidHallPosition(x: x, y: y, config: config) ? 
+                                  hallBackgroundColor(for: config.hall) : Color.clear)
                             .frame(width: gridSize, height: gridSize)
-                    }
-                    
-                    // Actual hall content
-                    ForEach(0..<config.width, id: \.self) { x in
-                        Rectangle()
-                            .fill(hallBackgroundColor(for: config.hall))
-                            .frame(width: gridSize, height: gridSize)
-                            .border(Color.gray.opacity(0.3), width: 0.5)
+                            .border(isValidHallPosition(x: x, y: y, config: config) ? 
+                                   Color.gray.opacity(0.3) : Color.clear, width: 0.5)
                             .opacity(hallOpacity(for: config.hall))
-                    }
-                    
-                    // Right padding to center the hall
-                    ForEach((leftPadding + config.width)..<totalMapWidth, id: \.self) { _ in
-                        Rectangle()
-                            .fill(Color.clear)
-                            .frame(width: gridSize, height: gridSize)
                     }
                 }
             }
         }
         .position(x: CGFloat(totalMapWidth) * gridSize / 2,
                   y: CGFloat(config.yStart + config.yEnd) * gridSize / 2)
+    }
+    
+    // Helper function to determine if a grid position is within a hall
+    private func isValidHallPosition(x: Int, y: Int, config: EventMapPathfinding.HallConfig) -> Bool {
+        let leftPadding = (totalMapWidth - config.width) / 2
+        let rightBound = leftPadding + config.width
+        
+        return x >= leftPadding && x < rightBound && y >= config.yStart && y <= config.yEnd
+    }
+    
+    // Individual booth view
+    private func boothView(booth: Booth) -> some View {
+        let is2x2Booth = booth.name.contains("2x2")
+        let boothSize = is2x2Booth ? gridSize * 2 : gridSize
+        
+        return Rectangle()
+            .fill(boothColor(for: booth))
+            .frame(width: boothSize, height: boothSize)
+            .border(boothBorderColor(for: booth), width: 1)
+            .opacity(hallOpacity(for: booth.hall))
+            .overlay(
+                // Crowd level indicator
+                VStack {
+                    Spacer()
+                    Rectangle()
+                        .fill(crowdIndicatorColor(level: booth.crowdLevel))
+                        .frame(height: 4)
+                        .cornerRadius(2)
+                }
+                .padding(2)
+            )
+            .onTapGesture {
+                // Handle booth tap - could show details, etc.
+                print("Tapped booth: \(booth.name), Crowd: \(booth.crowdLevel)")
+            }
+    }
+    
+    // Booths overlay - fixed positioning for alignment
+    private var boothsOverlay: some View {
+        ZStack {
+            ForEach(crowdData.booths) { booth in
+                if shouldShowHall(booth.hall) {
+                    boothView(booth: booth)
+                        .position(
+                            x: CGFloat(booth.gridPosition.x) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2),
+                            y: CGFloat(booth.gridPosition.y) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2) - gridSize/2 // Shifted up by half a grid
+                        )
+                }
+            }
+        }
+        .frame(width: CGFloat(totalMapWidth) * gridSize, 
+               height: CGFloat(totalMapHeight) * gridSize)
+    }
+    
+    // Booth colors based on hall
+    private func boothColor(for booth: Booth) -> Color {
+        switch booth.hall {
+        case .hallC: return Color.orange.opacity(0.8)   // Hall C booths
+        case .hallB: return Color.green.opacity(0.8)    // Hall B booths  
+        case .hallA: return Color.blue.opacity(0.8)     // Hall A booths
+        }
+    }
+    
+    // Booth border colors
+    private func boothBorderColor(for booth: Booth) -> Color {
+        booth.isActive ? Color.primary : Color.red
+    }
+    
+    // Crowd indicator colors
+    private func crowdIndicatorColor(level: Float) -> Color {
+        switch level {
+        case 0.0..<0.3: return .green
+        case 0.3..<0.7: return .yellow
+        default: return .red
+        }
     }
     
     // Hall labels
@@ -183,23 +244,7 @@ struct EventMapView: View {
     
     // Hall dividers
     private var hallDividers: some View {
-        ZStack {
-            if case .none = zoomedSection {
-                // Divider between Hall C and Hall B (after Hall C ends)
-                Rectangle()
-                    .fill(Color.black.opacity(0.4))
-                    .frame(width: CGFloat(totalMapWidth) * gridSize, height: 3)
-                    .position(x: CGFloat(totalMapWidth) * gridSize / 2, 
-                             y: CGFloat(8) * gridSize - 1.5) // Position between halls
-                
-                // Divider between Hall B and Hall A (after Hall B ends)
-                Rectangle()
-                    .fill(Color.black.opacity(0.4))
-                    .frame(width: CGFloat(totalMapWidth) * gridSize, height: 3)
-                    .position(x: CGFloat(totalMapWidth) * gridSize / 2, 
-                             y: CGFloat(16) * gridSize - 1.5) // Position between halls
-            }
-        }
+        EmptyView()  // This will remove all dividers
     }
     
     // Hall background colors
