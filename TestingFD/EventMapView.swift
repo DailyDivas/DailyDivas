@@ -35,9 +35,13 @@ struct EventMapView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     
+    // Category filter properties - change to single category
+    @State private var selectedCategory: BoothCategory? = nil
+    @State private var showCategoryFilter = false
+    
     private let gridSize: CGFloat = 40
-    private let totalMapWidth: Int = 12  // Use the largest hall width
-    private let totalMapHeight: Int = 22 // Sum of all hall heights
+    private let totalMapWidth: Int = 12
+    private let totalMapHeight: Int = 22
     
     // MARK: - Body
     var body: some View {
@@ -50,11 +54,17 @@ struct EventMapView: View {
             
             // UI Controls
             VStack {
-                // Top: Hall selector
+                // Top: Hall selector and category filter
                 HStack {
-                    Spacer()
                     hallSelector
                     Spacer()
+                    categoryFilterButton
+                }
+                
+                // Category filter panel
+                if showCategoryFilter {
+                    categoryFilterPanel
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 
                 Spacer()
@@ -154,42 +164,15 @@ struct EventMapView: View {
         return x >= leftPadding && x < rightBound && y >= config.yStart && y <= config.yEnd
     }
     
-    // Individual booth view
-    private func boothView(booth: Booth) -> some View {
-        let is2x2Booth = booth.name.contains("2x2")
-        let boothSize = is2x2Booth ? gridSize * 2 : gridSize
-        
-        return Rectangle()
-            .fill(boothColor(for: booth))
-            .frame(width: boothSize, height: boothSize)
-            .border(boothBorderColor(for: booth), width: 1)
-            .opacity(hallOpacity(for: booth.hall))
-            .overlay(
-                // Crowd level indicator
-                VStack {
-                    Spacer()
-                    Rectangle()
-                        .fill(crowdIndicatorColor(level: booth.crowdLevel))
-                        .frame(height: 4)
-                        .cornerRadius(2)
-                }
-                .padding(2)
-            )
-            .onTapGesture {
-                // Handle booth tap - could show details, etc.
-                print("Tapped booth: \(booth.name), Crowd: \(booth.crowdLevel)")
-            }
-    }
-    
-    // Booths overlay - fixed positioning for alignment
+    // Booths overlay - updated with category filtering
     private var boothsOverlay: some View {
         ZStack {
-            ForEach(crowdData.booths) { booth in
+            ForEach(filteredBooths) { booth in
                 if shouldShowHall(booth.hall) {
                     boothView(booth: booth)
                         .position(
                             x: CGFloat(booth.gridPosition.x) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2),
-                            y: CGFloat(booth.gridPosition.y) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2) - gridSize/2 // Shifted up by half a grid
+                            y: CGFloat(booth.gridPosition.y) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2) - gridSize/2
                         )
                 }
             }
@@ -198,26 +181,204 @@ struct EventMapView: View {
                height: CGFloat(totalMapHeight) * gridSize)
     }
     
-    // Booth colors based on hall
-    private func boothColor(for booth: Booth) -> Color {
-        switch booth.hall {
-        case .hallC: return Color.orange.opacity(0.8)   // Hall C booths
-        case .hallB: return Color.green.opacity(0.8)    // Hall B booths  
-        case .hallA: return Color.blue.opacity(0.8)     // Hall A booths
+    // Filtered booths based on selected category (single selection)
+    private var filteredBooths: [Booth] {
+        if let selectedCategory = selectedCategory {
+            return crowdData.booths.filter { booth in
+                booth.categories.contains(selectedCategory)
+            }
+        } else {
+            return crowdData.booths
         }
     }
     
-    // Booth border colors
-    private func boothBorderColor(for booth: Booth) -> Color {
-        booth.isActive ? Color.primary : Color.red
+    // Category filter button - updated for single selection
+    private var categoryFilterButton: some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showCategoryFilter.toggle()
+            }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 18))
+                Text("Filter")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                if selectedCategory != nil {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.thinMaterial)
+            .cornerRadius(20)
+            .shadow(radius: 3)
+        }
     }
     
-    // Crowd indicator colors
-    private func crowdIndicatorColor(level: Float) -> Color {
-        switch level {
-        case 0.0..<0.3: return .green
-        case 0.3..<0.7: return .yellow
-        default: return .red
+    // Category filter panel - updated for single selection
+    private var categoryFilterPanel: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Filter by Category")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button("Clear Filter") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedCategory = nil
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(.red)
+                .disabled(selectedCategory == nil)
+            }
+            
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                ForEach(BoothCategory.allCases, id: \.self) { category in
+                    categoryFilterChip(category: category)
+                }
+            }
+            
+            // Statistics - updated for single category
+            HStack {
+                Text("Showing \(filteredBooths.count) of \(crowdData.booths.count) booths")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+        .padding()
+        .background(.regularMaterial)
+        .cornerRadius(16)
+        .shadow(radius: 5)
+    }
+    
+    // Individual category filter chip - updated for single selection
+    private func categoryFilterChip(category: BoothCategory) -> some View {
+        let isSelected = selectedCategory == category
+        let boothCount = crowdData.getBooths(for: category).count
+        
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if isSelected {
+                    selectedCategory = nil // Deselect if already selected
+                } else {
+                    selectedCategory = category // Select this category (automatically deselects others)
+                }
+            }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: categoryIcon(for: category))
+                    .font(.system(size: 14))
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(category.rawValue.capitalized)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    Text("\(boothCount) booths")
+                        .font(.caption2)
+                        .opacity(0.7)
+                }
+                
+                Spacer()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? categoryColor(for: category) : Color(.systemGray6))
+            .foregroundColor(isSelected ? .white : .primary)
+            .cornerRadius(12)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // Category icons
+    private func categoryIcon(for category: BoothCategory) -> String {
+        switch category {
+        case .bodycare: return "figure.arms.open"
+        case .haircare: return "comb"
+        case .lipcare: return "mouth"
+        case .makeup: return "paintbrush"
+        case .perfume: return "drop"
+        case .skincare: return "face.smiling"
+        }
+    }
+    
+    // Category colors
+    private func categoryColor(for category: BoothCategory) -> Color {
+        switch category {
+        case .bodycare: return .blue
+        case .haircare: return .brown
+        case .lipcare: return .pink
+        case .makeup: return .purple
+        case .perfume: return .orange
+        case .skincare: return .green
+        }
+    }
+    
+    // Updated booth view for single category filtering
+    private func boothView(booth: Booth) -> some View {
+        let is2x2Booth = booth.name.contains("2x2")
+        let boothSize = is2x2Booth ? gridSize * 2 : gridSize
+        let isHighlighted = selectedCategory != nil && booth.categories.contains(selectedCategory!)
+        
+        return Rectangle()
+            .fill(boothColor(for: booth))
+            .frame(width: boothSize, height: boothSize)
+            .border(isHighlighted ? Color.yellow : boothBorderColor(for: booth), width: isHighlighted ? 3 : 1)
+            .opacity(boothOpacity(for: booth))
+            .overlay(
+                VStack {
+                    // Category indicators (top)
+                    if !booth.categories.isEmpty && boothSize >= gridSize {
+                        HStack(spacing: 2) {
+                            ForEach(booth.categories.prefix(2), id: \.self) { category in
+                                Circle()
+                                    .fill(categoryColor(for: category))
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                    
+                    Spacer()
+                    
+                    // Crowd level indicator (bottom)
+                    Rectangle()
+                        .fill(crowdIndicatorColor(level: booth.crowdLevel))
+                        .frame(height: 4)
+                        .cornerRadius(2)
+                        .padding(.horizontal, 2)
+                        .padding(.bottom, 2)
+                }
+            )
+            .onTapGesture {
+                print("Tapped booth: \(booth.name)")
+                print("Categories: \(booth.categories.map { $0.rawValue }.joined(separator: ", "))")
+                print("Crowd: \(booth.crowdLevel)")
+            }
+    }
+    
+    // Booth opacity based on single category filter
+    private func boothOpacity(for booth: Booth) -> Double {
+        let baseOpacity = hallOpacity(for: booth.hall)
+        
+        if let selectedCategory = selectedCategory {
+            let matchesFilter = booth.categories.contains(selectedCategory)
+            return matchesFilter ? baseOpacity : baseOpacity * 0.3
+        } else {
+            return baseOpacity
         }
     }
     
@@ -391,6 +552,34 @@ struct EventMapView: View {
     private func zoomOut() {
         withAnimation(.easeInOut) {
             scale = max(0.5, scale / 1.3)
+        }
+    }
+    
+    // Booth color based on hall
+    private func boothColor(for booth: Booth) -> Color {
+        switch booth.hall {
+        case .hallA: return Color.blue.opacity(0.7)
+        case .hallB: return Color.green.opacity(0.7)
+        case .hallC: return Color.orange.opacity(0.7)
+        }
+    }
+    
+    // Booth border color
+    private func boothBorderColor(for booth: Booth) -> Color {
+        switch booth.hall {
+        case .hallA: return Color.blue
+        case .hallB: return Color.green
+        case .hallC: return Color.orange
+        }
+    }
+    
+    // Crowd indicator color based on level
+    private func crowdIndicatorColor(level: Float) -> Color {
+        switch level {
+        case 0.0..<0.3: return .green      // Low crowd
+        case 0.3..<0.6: return .yellow     // Medium crowd
+        case 0.6..<0.8: return .orange     // High crowd
+        default: return .red               // Very high crowd
         }
     }
 }

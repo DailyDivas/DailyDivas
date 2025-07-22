@@ -9,6 +9,15 @@ enum Hall: String, CaseIterable {
     case hallC = "Hall C"
 }
 
+enum BoothCategory: String, CaseIterable {
+    case bodycare = "bodycare"
+    case haircare = "haircare"
+    case lipcare = "lipcare"
+    case makeup = "makeup"
+    case perfume = "perfume"
+    case skincare = "skincare"
+}
+
 struct GridPosition: Hashable, Equatable {
     let x: Int
     let y: Int
@@ -23,6 +32,7 @@ struct Booth: Identifiable, Hashable {
     var crowdLevel: Float = 0.0
     var isActive: Bool = true
     var beaconUUID: String = UUID().uuidString
+    var categories: [BoothCategory] = []
 }
 
 class CrowdData: ObservableObject {
@@ -63,55 +73,57 @@ class CrowdData: ObservableObject {
         
         // First column - 1x1 booths (leftmost column of Hall C) - full vertical span
         for y in 0...7 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "C-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallCStartX, y: y),
                 hall: .hallC
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
         // Columns 2-3: 2x2 booths (positioned at their top-left corner) - full vertical span
         for y in stride(from: 0, through: 6, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "C-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallCStartX + 2, y: y),
                 hall: .hallC
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
         // Columns 5-6: 2x2 booths (positioned at their top-left corner) - full vertical span
         for y in stride(from: 0, through: 6, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "C-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallCStartX + 5, y: y),
                 hall: .hallC
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
         // Last column - 1x1 booths (rightmost column of Hall C) - full vertical span
         for y in 0...7 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "C-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallCStartX + 8, y: y),
                 hall: .hallC
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
         // Hall B booths (y: 8-15, 12 wide, full width)
-        // Sequence: 1x1 booth, path, 2x2 booth, path, 2x2 booth, path, 1x1 booths, path, 1x1 booths
-        // Skip top and bottom rows (y: 9-14, so 6 rows available)
-        
         // Column 0: 1x1 booths (leftmost)
         for y in 9...14 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "B-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: 0, y: y),
                 hall: .hallB
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -119,11 +131,12 @@ class CrowdData: ObservableObject {
         
         // Columns 2-3: 2x2 booths
         for y in stride(from: 9, through: 13, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "B-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: 2, y: y),
                 hall: .hallB
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -131,11 +144,12 @@ class CrowdData: ObservableObject {
         
         // Columns 5-6: 2x2 booths
         for y in stride(from: 9, through: 13, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "B-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: 5, y: y),
                 hall: .hallB
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -143,11 +157,12 @@ class CrowdData: ObservableObject {
         
         // Column 8: 1x1 booths
         for y in 9...14 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "B-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: 8, y: y),
                 hall: .hallB
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -155,11 +170,12 @@ class CrowdData: ObservableObject {
         
         // Column 10: 1x1 booths
         for y in 9...14 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "B-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: 10, y: y),
                 hall: .hallB
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -170,11 +186,12 @@ class CrowdData: ObservableObject {
         
         // Column 0: 1x1 booths (leftmost) - full vertical span
         for y in 16...21 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "A-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallAStartX, y: y),
                 hall: .hallA
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -182,11 +199,12 @@ class CrowdData: ObservableObject {
         
         // Columns 2-3: 2x2 booths - full vertical span
         for y in stride(from: 16, through: 20, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "A-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallAStartX + 2, y: y),
                 hall: .hallA
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -194,11 +212,12 @@ class CrowdData: ObservableObject {
         
         // Columns 5-6: 2x2 booths - full vertical span
         for y in stride(from: 16, through: 20, by: 2) {
-            let booth = Booth(
+            var booth = Booth(
                 name: "A-2x2-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallAStartX + 5, y: y),
                 hall: .hallA
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -206,11 +225,12 @@ class CrowdData: ObservableObject {
         
         // Column 8: 1x1 booths (rightmost) - full vertical span
         for y in 16...21 {
-            let booth = Booth(
+            var booth = Booth(
                 name: "A-1x1-\(newBooths.count + 1)",
                 gridPosition: GridPosition(x: hallAStartX + 8, y: y),
                 hall: .hallA
             )
+            booth.categories = generateRandomCategories()
             newBooths.append(booth)
         }
         
@@ -239,6 +259,39 @@ class CrowdData: ObservableObject {
             let newLevel = max(0.0, min(1.0, currentLevel + change))
             
             updateCrowdLevel(at: booth.gridPosition, level: newLevel)
+        }
+    }
+    
+    // Add this helper function to generate random categories
+    private func generateRandomCategories() -> [BoothCategory] {
+        let allCategories = BoothCategory.allCases
+        let numberOfCategories = Int.random(in: 1...2) // 1 or 2 categories
+        
+        var selectedCategories: [BoothCategory] = []
+        
+        for _ in 0..<numberOfCategories {
+            var randomCategory: BoothCategory
+            repeat {
+                randomCategory = allCategories.randomElement()!
+            } while selectedCategories.contains(randomCategory)
+            
+            selectedCategories.append(randomCategory)
+        }
+        
+        return selectedCategories
+    }
+    
+    // Add helper function to get booths by category
+    func getBooths(for category: BoothCategory) -> [Booth] {
+        return booths.filter { $0.categories.contains(category) }
+    }
+    
+    // Add helper function to get booths by multiple categories
+    func getBooths(for categories: [BoothCategory]) -> [Booth] {
+        return booths.filter { booth in
+            return categories.allSatisfy { category in
+                booth.categories.contains(category)
+            }
         }
     }
 }
