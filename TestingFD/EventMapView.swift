@@ -27,7 +27,14 @@ enum ZoomSection: CaseIterable {
 
 struct EventMapView: View {
     @StateObject private var crowdData = CrowdData()
-    @State private var pathfinding: EventMapPathfinding?
+    @StateObject private var pathfinding: EventMapPathfinding
+    
+    // Initialize pathfinding with the same crowdData instance
+    init() {
+        let crowdData = CrowdData()
+        self._crowdData = StateObject(wrappedValue: crowdData)
+        self._pathfinding = StateObject(wrappedValue: EventMapPathfinding(width: 12, height: 22, crowdData: crowdData))
+    }
     
     // Zoom and section properties
     @State private var zoomedSection: ZoomSection = .none
@@ -35,10 +42,16 @@ struct EventMapView: View {
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
     
-    // Category filter properties - change to single category
+    // Category filter properties
     @State private var selectedCategory: BoothCategory? = nil
     @State private var showCategoryFilter = false
     
+    // Add this state variable to track booth selection
+    @State private var selectedBoothForStart: Booth? = nil
+    
+    // Add state to track completed path segments
+    @State private var completedPathIndices: Set<Int> = []
+
     private let gridSize: CGFloat = 40
     private let totalMapWidth: Int = 12
     private let totalMapHeight: Int = 22
@@ -61,6 +74,12 @@ struct EventMapView: View {
                     categoryFilterButton
                 }
                 
+                // Pathfinding instructions - always show when relevant
+                if pathfinding.startPoint != nil || pathfinding.endPoint != nil {
+                    pathfindingInstructions
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                
                 // Category filter panel
                 if showCategoryFilter {
                     categoryFilterPanel
@@ -77,9 +96,6 @@ struct EventMapView: View {
             .padding()
         }
         .background(Color(.systemGroupedBackground))
-        .onAppear {
-            setupPathfinding()
-        }
     }
     
     // Computed properties for current scale and offset
@@ -115,21 +131,170 @@ struct EventMapView: View {
     private var mapContent: some View {
         ZStack {
             hallGrids
+            pathOverlay
+            adjacentPathsOverlay
             boothsOverlay
+            pathfindingMarkersOverlay
             hallLabels
-            // hallDividers  // Remove this line to eliminate hall separators
         }
         .frame(width: CGFloat(totalMapWidth) * gridSize, 
                height: CGFloat(totalMapHeight) * gridSize)
     }
     
+    // Path overlay - fix both line and checkpoint positioning
+    private var pathOverlay: some View {
+        ZStack {
+            // Draw path lines - shift up by half a grid
+            if pathfinding.currentPath.count > 1 {
+                ForEach(0..<pathfinding.currentPath.count - 1, id: \.self) { index in
+                    let currentNode = pathfinding.currentPath[index]
+                    let nextNode = pathfinding.currentPath[index + 1]
+                    
+                    let startX = CGFloat(currentNode.gridPosition.x) * gridSize + gridSize/2
+                    let startY = CGFloat(currentNode.gridPosition.y) * gridSize  // Remove the + gridSize/2 here
+                    let endX = CGFloat(nextNode.gridPosition.x) * gridSize + gridSize/2
+                    let endY = CGFloat(nextNode.gridPosition.y) * gridSize  // Remove the + gridSize/2 here
+                    
+                    Path { path in
+                        let startPoint = CGPoint(x: startX, y: startY)
+                        let endPoint = CGPoint(x: endX, y: endY)
+                        
+                        path.move(to: startPoint)
+                        path.addLine(to: endPoint)
+                    }
+                    .stroke(
+                        completedPathIndices.contains(index) ? Color.gray : Color.blue,
+                        lineWidth: 4
+                    )
+                    .opacity(0.8)
+                }
+            }
+            
+            // Draw checkpoint dots only at direction changes, start, and end
+            ForEach(Array(getDirectionChangeIndices().enumerated()), id: \.offset) { arrayIndex, pathIndex in
+                let node = pathfinding.currentPath[pathIndex]
+                let isCompleted = completedPathIndices.contains(pathIndex)
+                let isLastCheckpoint = pathIndex == pathfinding.currentPath.count - 1
+                let fillColor = isCompleted ? Color.gray : (isLastCheckpoint ? Color.red : Color.blue)
+                
+                let xPos = CGFloat(node.gridPosition.x) * gridSize + gridSize/2
+                let yPos = CGFloat(node.gridPosition.y) * gridSize  // Already corrected
+                
+                Circle()
+                    .fill(fillColor)
+                    .frame(width: 16, height: 16)
+                    .position(x: xPos, y: yPos)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: 2)
+                            .frame(width: 16, height: 16)
+                            .position(x: xPos, y: yPos)
+                    )
+                    .onTapGesture {
+                        handleCheckpointTap(at: pathIndex)
+                    }
+            }
+        }
+    }
+    
+    // Add this helper function to find direction changes
+    private func getDirectionChangeIndices() -> [Int] {
+        guard pathfinding.currentPath.count > 2 else {
+            // If path has 2 or fewer points, show start and end
+            return Array(0..<pathfinding.currentPath.count)
+        }
+        
+        var indices: [Int] = []
+        
+        // Always include the start point
+        indices.append(0)
+        
+        // Check for direction changes
+        for i in 1..<pathfinding.currentPath.count - 1 {
+            let prevNode = pathfinding.currentPath[i - 1]
+            let currentNode = pathfinding.currentPath[i]
+            let nextNode = pathfinding.currentPath[i + 1]
+            
+            // Calculate direction vectors
+            let directionToCurrent = (
+                x: currentNode.gridPosition.x - prevNode.gridPosition.x,
+                y: currentNode.gridPosition.y - prevNode.gridPosition.y
+            )
+            
+            let directionFromCurrent = (
+                x: nextNode.gridPosition.x - currentNode.gridPosition.x,
+                y: nextNode.gridPosition.y - currentNode.gridPosition.y
+            )
+            
+            // If direction changes, this is a turn point
+            if directionToCurrent.x != directionFromCurrent.x || directionToCurrent.y != directionFromCurrent.y {
+                indices.append(i)
+            }
+        }
+        
+        // Always include the end point
+        indices.append(pathfinding.currentPath.count - 1)
+        
+        return indices
+    }
+    
+    // Adjacent paths overlay (when selecting start/end points)
+    private var adjacentPathsOverlay: some View {
+        ZStack {
+        // Only show adjacent paths when user has selected a booth but hasn't set start point yet
+        if let selectedBooth = selectedBoothForStart, pathfinding.startPoint == nil {
+            let adjacentPositions = pathfinding.getAdjacentPathPositions(for: selectedBooth)
+            
+            ForEach(adjacentPositions, id: \.self) { position in
+                let xPosition = CGFloat(position.x) * gridSize + gridSize/2
+                let yPosition = CGFloat(position.y) * gridSize  // Remove the + gridSize/2 here
+                
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 12, height: 12)
+                    .position(x: xPosition, y: yPosition)
+                    .opacity(0.7)
+                    .onTapGesture {
+                        pathfinding.setStartPoint(position)
+                        selectedBoothForStart = nil // Clear selection after setting start point
+                    }
+            }
+        }
+    }
+    }
+    
+    // Pathfinding markers overlay
+    private var pathfindingMarkersOverlay: some View {
+        ZStack {
+            // Start point marker
+            if let startPoint = pathfinding.startPoint {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.green)
+                    .position(
+                        x: CGFloat(startPoint.x) * gridSize + gridSize/2,
+                        y: CGFloat(startPoint.y) * gridSize  // Remove the + gridSize/2 here
+                    )
+            }
+            
+            // End point marker
+            if let endPoint = pathfinding.endPoint {
+                Image(systemName: "flag.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.red)
+                    .position(
+                        x: CGFloat(endPoint.x) * gridSize + gridSize/2,
+                        y: CGFloat(endPoint.y) * gridSize  // Remove the + gridSize/2 here
+                    )
+            }
+        }
+    }
+    
     // Hall grids
     private var hallGrids: some View {
         ZStack {
-            if let pathfinding = pathfinding {
-                ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
-                    hallGrid(config: config)
-                }
+            ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
+                hallGrid(config: config)
             }
         }
     }
@@ -332,11 +497,16 @@ struct EventMapView: View {
         let is2x2Booth = booth.name.contains("2x2")
         let boothSize = is2x2Booth ? gridSize * 2 : gridSize
         let isHighlighted = selectedCategory != nil && booth.categories.contains(selectedCategory!)
+        let isSelectedForStart = selectedBoothForStart?.id == booth.id
         
         return Rectangle()
             .fill(boothColor(for: booth))
             .frame(width: boothSize, height: boothSize)
-            .border(isHighlighted ? Color.yellow : boothBorderColor(for: booth), width: isHighlighted ? 3 : 1)
+            .border(
+                isSelectedForStart ? Color.green : 
+                (isHighlighted ? Color.yellow : boothBorderColor(for: booth)), 
+                width: isSelectedForStart ? 3 : (isHighlighted ? 3 : 1)
+            )
             .opacity(boothOpacity(for: booth))
             .overlay(
                 VStack {
@@ -364,10 +534,26 @@ struct EventMapView: View {
                 }
             )
             .onTapGesture {
-                print("Tapped booth: \(booth.name)")
-                print("Categories: \(booth.categories.map { $0.rawValue }.joined(separator: ", "))")
-                print("Crowd: \(booth.crowdLevel)")
+                handleBoothTap(booth)
             }
+    }
+    
+    // New function to handle booth taps with the correct flow
+    private func handleBoothTap(_ booth: Booth) {
+        if pathfinding.startPoint == nil {
+            // Step 1: Select booth to see adjacent path options
+            selectedBoothForStart = booth
+            completedPathIndices.removeAll() // Reset completed paths
+        } else if pathfinding.endPoint == nil {
+            // Step 2: Set destination (automatically find closest adjacent path)
+            pathfinding.selectBoothAsDestination(booth)
+            completedPathIndices.removeAll() // Reset completed paths
+        } else {
+            // Both points set - reset and start over with this booth
+            pathfinding.clearPath()
+            selectedBoothForStart = booth
+            completedPathIndices.removeAll() // Reset completed paths
+        }
     }
     
     // Booth opacity based on single category filter
@@ -385,19 +571,17 @@ struct EventMapView: View {
     // Hall labels
     private var hallLabels: some View {
         ZStack {
-            if let pathfinding = pathfinding {
-                ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
-                    if shouldShowHall(config.hall) {
-                        Text(config.hall.rawValue)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                            .padding(8)
-                            .background(.thinMaterial)
-                            .cornerRadius(8)
-                            .position(x: CGFloat(totalMapWidth) * gridSize / 2, // Center horizontally
-                                      y: CGFloat(config.yStart + 1) * gridSize)
-                    }
+            ForEach(pathfinding.getAllHallConfigs(), id: \.hall) { config in
+                if shouldShowHall(config.hall) {
+                    Text(config.hall.rawValue)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primary)
+                        .padding(8)
+                        .background(.thinMaterial)
+                        .cornerRadius(8)
+                        .position(x: CGFloat(totalMapWidth) * gridSize / 2, // Center horizontally
+                                  y: CGFloat(config.yStart + 1) * gridSize)
                 }
             }
         }
@@ -526,13 +710,6 @@ struct EventMapView: View {
         )
     }
     
-    // Setup pathfinding
-    private func setupPathfinding() {
-        pathfinding = EventMapPathfinding(width: Int32(totalMapWidth), 
-                                         height: Int32(totalMapHeight), 
-                                         crowdData: crowdData)
-    }
-    
     // Map control functions
     private func resetMapPosition() {
         withAnimation(.easeInOut) {
@@ -580,6 +757,82 @@ struct EventMapView: View {
         case 0.3..<0.6: return .yellow     // Medium crowd
         case 0.6..<0.8: return .orange     // High crowd
         default: return .red               // Very high crowd
+        }
+    }
+    
+    // Pathfinding instructions
+    private var pathfindingInstructions: some View {
+        VStack(spacing: 8) {
+            if pathfinding.startPoint == nil && selectedBoothForStart == nil {
+                HStack {
+                    Image(systemName: "1.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Tap any booth to see starting point options")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+            } else if pathfinding.startPoint == nil && selectedBoothForStart != nil {
+                HStack {
+                    Image(systemName: "location.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Tap a green circle next to the booth to set your starting point")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+            } else if pathfinding.endPoint == nil {
+                HStack {
+                    Image(systemName: "2.circle.fill")
+                        .foregroundColor(.red)
+                    Text("Tap another booth to set your destination")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+            } else {
+                VStack(spacing: 4) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Route calculated!")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .fontWeight(.medium)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "hand.tap.fill")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Text("Tap blue dots to mark progress • Tap red dot to finish")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(.regularMaterial)
+        .cornerRadius(12)
+        .shadow(radius: 3)
+    }
+    
+    // Add the missing handleCheckpointTap function
+    private func handleCheckpointTap(at index: Int) {
+        let isLastCheckpoint = index == pathfinding.currentPath.count - 1
+        
+        if isLastCheckpoint {
+            // Last checkpoint tapped - remove the entire pathway
+            withAnimation(.easeInOut(duration: 0.5)) {
+                pathfinding.clearPath()
+                completedPathIndices.removeAll()
+                selectedBoothForStart = nil
+            }
+        } else {
+            // Regular checkpoint tapped - mark previous segments as grey
+            withAnimation(.easeInOut(duration: 0.3)) {
+                for i in 0...index {
+                    completedPathIndices.insert(i)
+                }
+            }
         }
     }
 }
