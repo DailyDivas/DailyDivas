@@ -10,8 +10,7 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         EventMapView()
-            .ignoresSafeArea(.all)
-          
+//            .ignoresSafeArea(.all)
     }
 }
 
