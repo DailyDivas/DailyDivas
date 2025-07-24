@@ -182,16 +182,15 @@ class EventMapPathfinding: NSObject, ObservableObject {
     
     // Pathfinding functions
     func findPath(from start: GridPosition, to end: GridPosition) -> [GridPosition] {
-        guard let startNode = gridGraph.node(atGridPosition: vector_int2(Int32(start.x), Int32(start.y))),
-              let endNode = gridGraph.node(atGridPosition: vector_int2(Int32(end.x), Int32(end.y))) else {
-            return []
+        // Use custom A* for crowd-aware pathfinding
+        let pathPositions = findPathWithCrowdAvoidance(from: start, to: end)
+        
+        // Update currentPath for UI display
+        currentPath = pathPositions.compactMap { position in
+            gridGraph.node(atGridPosition: vector_int2(Int32(position.x), Int32(position.y)))
         }
         
-        let path = gridGraph.findPath(from: startNode, to: endNode) as? [GKGridGraphNode] ?? []
-        
-        return path.map { node in
-            GridPosition(x: Int(node.gridPosition.x), y: Int(node.gridPosition.y))
-        }
+        return pathPositions
     }
     
     func startPathfinding() {
@@ -273,5 +272,124 @@ class EventMapPathfinding: NSObject, ObservableObject {
     
     func getAllHallConfigs() -> [HallConfig] {
         return hallConfigs
+    }
+    
+    // Add this custom A* implementation to your PathfindingModel.swift
+    private func findPathWithCrowdAvoidance(from start: GridPosition, to end: GridPosition) -> [GridPosition] {
+        var openSet: [GridPosition] = [start]
+        var cameFrom: [GridPosition: GridPosition] = [:]
+        var gScore: [GridPosition: Float] = [start: 0]
+        var fScore: [GridPosition: Float] = [start: heuristic(start, end)]
+        
+        while !openSet.isEmpty {
+            // Find node with lowest fScore
+            let current = openSet.min { fScore[$0, default: Float.infinity] < fScore[$1, default: Float.infinity] }!
+            
+            if current == end {
+                return reconstructPath(cameFrom: cameFrom, current: current)
+            }
+            
+            openSet.removeAll { $0 == current }
+            
+            // Check all neighbors
+            for neighbor in getWalkableNeighbors(of: current) {
+                let tentativeGScore = gScore[current, default: Float.infinity] + calculateEdgeWeight(from: current, to: neighbor)
+                
+                if tentativeGScore < gScore[neighbor, default: Float.infinity] {
+                    cameFrom[neighbor] = current
+                    gScore[neighbor] = tentativeGScore
+                    fScore[neighbor] = tentativeGScore + heuristic(neighbor, end)
+                    
+                    if !openSet.contains(neighbor) {
+                        openSet.append(neighbor)
+                    }
+                }
+            }
+        }
+        
+        return [] // No path found
+    }
+    
+    private func calculateEdgeWeight(from: GridPosition, to: GridPosition) -> Float {
+        let baseCost: Float = 1.0
+        let crowdLevel = Float(crowdData.getCrowdLevel(at: to))
+        
+        // Add debug logging
+        if crowdLevel > 0 {
+            print("🚶‍♂️ Position (\(to.x), \(to.y)) has crowd level: \(crowdLevel)")
+        }
+        
+        // Scale crowd penalty - adjust these values as needed
+        let crowdPenalty: Float
+        switch Int(crowdLevel) {
+        case 0...5: crowdPenalty = 0.0      // No penalty for low crowd
+        case 6...10: crowdPenalty = 2.0     // Medium penalty
+        case 11...15: crowdPenalty = 5.0    // High penalty
+        case 16...20: crowdPenalty = 10.0   // Very high penalty
+        default: crowdPenalty = 15.0        // Extreme penalty
+        }
+        
+        let totalWeight = baseCost + crowdPenalty
+        
+        // Add debug logging for weights
+        if crowdPenalty > 0 {
+            print("📊 Edge weight from (\(from.x), \(from.y)) to (\(to.x), \(to.y)): \(totalWeight) (base: \(baseCost), penalty: \(crowdPenalty))")
+        }
+        
+        return totalWeight
+    }
+    
+    private func getWalkableNeighbors(of position: GridPosition) -> [GridPosition] {
+        let directions = [(0, 1), (1, 0), (0, -1), (-1, 0)] // up, right, down, left
+        var neighbors: [GridPosition] = []
+        
+        for (dx, dy) in directions {
+            let neighbor = GridPosition(x: position.x + dx, y: position.y + dy)
+            
+            // Check if position is walkable using existing GameplayKit graph
+            if let _ = gridGraph.node(atGridPosition: vector_int2(Int32(neighbor.x), Int32(neighbor.y))) {
+                neighbors.append(neighbor)
+            }
+        }
+        
+        return neighbors
+    }
+    
+    private func heuristic(_ a: GridPosition, _ b: GridPosition) -> Float {
+        // Manhattan distance
+        return Float(abs(a.x - b.x) + abs(a.y - b.y))
+    }
+    
+    private func reconstructPath(cameFrom: [GridPosition: GridPosition], current: GridPosition) -> [GridPosition] {
+        var path = [current]
+        var current = current
+        
+        while let previous = cameFrom[current] {
+            path.insert(previous, at: 0)
+            current = previous
+        }
+        
+        return path
+    }
+    
+    // Add this function to analyze the path
+    func analyzePath() -> String {
+        guard !currentPath.isEmpty else { return "No path calculated" }
+        
+        var analysis = "🛤️ Path Analysis:\n"
+        var totalCrowdExposure = 0
+        
+        for (index, node) in currentPath.enumerated() {
+            let position = GridPosition(x: Int(node.gridPosition.x), y: Int(node.gridPosition.y))
+            let crowdLevel = crowdData.getCrowdLevel(at: position)
+            totalCrowdExposure += crowdLevel
+            
+            analysis += "Step \(index + 1): (\(position.x), \(position.y)) - Crowd: \(crowdLevel)\n"
+        }
+        
+        analysis += "Total crowd exposure: \(totalCrowdExposure)\n"
+        analysis += "Average crowd per step: \(Double(totalCrowdExposure) / Double(currentPath.count))"
+        
+        return analysis
     }
 }

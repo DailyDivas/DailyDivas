@@ -269,9 +269,9 @@ class CrowdData: ObservableObject {
             monitoredPathway: pathway3
         ))
         
-        // Hall B CCTVs - monitoring vertical pathways (x = 1, 4, 7, 9)
+        // Hall B CCTVs - monitoring vertical pathways (x = 1, 4, 7, 9, 11)
         // Place CCTVs at the top corners of each pathway
-        let pathwayPositionsB = [1, 4, 7, 9]
+        let pathwayPositionsB = [1, 4, 7, 9, 11] // Added 11 for the rightmost pathway
         for (index, x) in pathwayPositionsB.enumerated() {
             var pathway: [GridPosition] = []
             for y in 9...14 {
@@ -288,8 +288,8 @@ class CrowdData: ObservableObject {
         // Hall A CCTVs - monitoring vertical pathways
         // Place CCTVs at the top corners of each pathway
         let hallAStartX = (12 - 10) / 2
-        let pathwayPositionsA = [hallAStartX + 1, hallAStartX + 4, hallAStartX + 7]
-        
+        let pathwayPositionsA = [hallAStartX + 1, hallAStartX + 4, hallAStartX + 7, hallAStartX + 9] // Added hallAStartX + 9 for the rightmost pathway
+
         for (index, x) in pathwayPositionsA.enumerated() {
             var pathway: [GridPosition] = []
             for y in 16...21 {

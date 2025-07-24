@@ -591,6 +591,22 @@ struct EventMapView: View {
                 Image(systemName: "plus.magnifyingglass")
                     .font(.system(size: 18))
             }
+            
+            Button(action: {
+                print("🔍 Current Path Analysis:")
+                print(pathfinding.analyzePath())
+                
+                // Print a summary
+                let highCrowdAreas = crowdData.cctvs.filter { $0.peopleCount > 15 }
+                print("📊 High crowd areas (>15 people):")
+                for cctv in highCrowdAreas {
+                    print("  \(cctv.name): \(cctv.peopleCount) people at (\(cctv.position.x), \(cctv.position.y))")
+                }
+            }) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 18))
+            }
+            .tint(.orange)
         }
         .buttonStyle(.bordered)
         .tint(.secondary)
