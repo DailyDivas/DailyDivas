@@ -1,4 +1,5 @@
 import SwiftUI
+import simd  // Add this import for vector_int2
 
 enum ZoomSection: CaseIterable {
     case none
@@ -46,8 +47,9 @@ struct EventMapView: View {
     @State private var selectedCategory: BoothCategory? = nil
     @State private var showCategoryFilter = false
     
-    // Add this state variable to track booth selection
-    @State private var selectedBoothForStart: Booth? = nil
+    // Updated state variables for new flow
+    @State private var selectedBoothForDestination: Booth? = nil
+    @State private var showBoothDetails = false
     
     // Add state to track completed path segments
     @State private var completedPathIndices: Set<Int> = []
@@ -74,8 +76,14 @@ struct EventMapView: View {
                     categoryFilterButton
                 }
                 
+                // Booth details panel (new)
+                if showBoothDetails, let selectedBooth = selectedBoothForDestination {
+                    boothDetailsPanel(for: selectedBooth)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                
                 // Pathfinding instructions - always show when relevant
-                if pathfinding.startPoint != nil || pathfinding.endPoint != nil {
+                if pathfinding.endPoint != nil || pathfinding.startPoint != nil {
                     pathfindingInstructions
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -243,26 +251,26 @@ struct EventMapView: View {
     // Adjacent paths overlay (when selecting start/end points)
     private var adjacentPathsOverlay: some View {
         ZStack {
-        // Only show adjacent paths when user has selected a booth but hasn't set start point yet
-        if let selectedBooth = selectedBoothForStart, pathfinding.startPoint == nil {
-            let adjacentPositions = pathfinding.getAdjacentPathPositions(for: selectedBooth)
-            
-            ForEach(adjacentPositions, id: \.self) { position in
-                let xPosition = CGFloat(position.x) * gridSize + gridSize/2
-                let yPosition = CGFloat(position.y) * gridSize  // Remove the + gridSize/2 here
+            // Show adjacent paths when user has set destination but hasn't set start point yet
+            if pathfinding.endPoint != nil && pathfinding.startPoint == nil {
+                // Get all valid walkable positions as potential starting points
+                let allWalkablePositions = getAllWalkablePositions()
                 
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 12, height: 12)
-                    .position(x: xPosition, y: yPosition)
-                    .opacity(0.7)
-                    .onTapGesture {
-                        pathfinding.setStartPoint(position)
-                        selectedBoothForStart = nil // Clear selection after setting start point
-                    }
+                ForEach(allWalkablePositions, id: \.self) { position in
+                    let xPosition = CGFloat(position.x) * gridSize + gridSize/2
+                    let yPosition = CGFloat(position.y) * gridSize
+                    
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 12, height: 12)
+                        .position(x: xPosition, y: yPosition)
+                        .opacity(0.7)
+                        .onTapGesture {
+                            pathfinding.setStartPoint(position)
+                        }
+                }
             }
         }
-    }
     }
     
     // Pathfinding markers overlay
@@ -417,15 +425,15 @@ struct EventMapView: View {
         let is2x2Booth = booth.name.contains("2x2")
         let boothSize = is2x2Booth ? gridSize * 2 : gridSize
         let isHighlighted = selectedCategory != nil && booth.categories.contains(selectedCategory!)
-        let isSelectedForStart = selectedBoothForStart?.id == booth.id
+        let isSelectedForDestination = selectedBoothForDestination?.id == booth.id
         
         return Rectangle()
             .fill(boothColor(for: booth))
             .frame(width: boothSize, height: boothSize)
             .border(
-                isSelectedForStart ? Color.green : 
+                isSelectedForDestination ? Color.red : 
                 (isHighlighted ? Color.yellow : boothBorderColor(for: booth)), 
-                width: isSelectedForStart ? 3 : (isHighlighted ? 3 : 1)
+                width: isSelectedForDestination ? 3 : (isHighlighted ? 3 : 1)
             )
             .opacity(boothOpacity(for: booth))
             .overlay(
@@ -444,7 +452,17 @@ struct EventMapView: View {
                     
                     Spacer()
                     
-                    // Removed crowd level indicator section
+                    // Show booth name if selected
+                    if isSelectedForDestination && boothSize >= gridSize {
+                        Text(booth.name)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 1)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(2)
+                            .padding(.bottom, 2)
+                    }
                 }
             )
             .onTapGesture {
@@ -452,24 +470,17 @@ struct EventMapView: View {
             }
     }
     
-    // New function to handle booth taps with the correct flow
+    // Updated function to handle booth taps with the new flow
     private func handleBoothTap(_ booth: Booth) {
-        if pathfinding.startPoint == nil {
-            // Step 1: Select booth to see adjacent path options
-            selectedBoothForStart = booth
-            completedPathIndices.removeAll() // Reset completed paths
-        } else if pathfinding.endPoint == nil {
-            // Step 2: Set destination (automatically find closest adjacent path)
-            pathfinding.selectBoothAsDestination(booth)
-            completedPathIndices.removeAll() // Reset completed paths
-        } else {
-            // Both points set - reset and start over with this booth
-            pathfinding.clearPath()
-            selectedBoothForStart = booth
-            completedPathIndices.removeAll() // Reset completed paths
-        }
+        // Reset any existing path
+        pathfinding.clearPath()
+        completedPathIndices.removeAll()
+        
+        // Select booth for destination details
+        selectedBoothForDestination = booth
+        showBoothDetails = true
     }
-    
+
     // Booth opacity based on single category filter
     private func boothOpacity(for booth: Booth) -> Double {
         let baseOpacity = hallOpacity(for: booth.hall)
@@ -693,27 +704,19 @@ struct EventMapView: View {
     // Pathfinding instructions
     private var pathfindingInstructions: some View {
         VStack(spacing: 8) {
-            if pathfinding.startPoint == nil && selectedBoothForStart == nil {
+            if pathfinding.endPoint == nil {
                 HStack {
                     Image(systemName: "1.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Tap any booth to see starting point options")
+                        .foregroundColor(.red)
+                    Text("Tap any booth to see details and set as destination")
                         .font(.subheadline)
                         .foregroundColor(.primary)
                 }
-            } else if pathfinding.startPoint == nil && selectedBoothForStart != nil {
-                HStack {
-                    Image(systemName: "location.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Tap a green circle next to the booth to set your starting point")
-                        .font(.subheadline)
-                        .foregroundColor(.primary)
-                }
-            } else if pathfinding.endPoint == nil {
+            } else if pathfinding.startPoint == nil {
                 HStack {
                     Image(systemName: "2.circle.fill")
-                        .foregroundColor(.red)
-                    Text("Tap another booth to set your destination")
+                        .foregroundColor(.green)
+                    Text("Tap a green circle on any pathway to set your starting point")
                         .font(.subheadline)
                         .foregroundColor(.primary)
                 }
@@ -754,7 +757,7 @@ struct EventMapView: View {
             withAnimation(.easeInOut(duration: 0.5)) {
                 pathfinding.clearPath()
                 completedPathIndices.removeAll()
-                selectedBoothForStart = nil
+                selectedBoothForDestination = nil
             }
         } else {
             // Regular checkpoint tapped - mark previous segments as grey
@@ -857,8 +860,93 @@ struct EventMapView: View {
         case .skincare: return .cyan
         }
     }
-}
+    
+    // New booth details panel
+    private func boothDetailsPanel(for booth: Booth) -> some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(booth.name)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    
+                    Text("Hall: \(booth.hall.rawValue)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if !booth.categories.isEmpty {
+                        HStack(spacing: 4) {
+                            Text("Categories:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            ForEach(booth.categories, id: \.self) { category in
+                                HStack(spacing: 2) {
+                                    Circle()
+                                        .fill(categoryColor(for: category))
+                                        .frame(width: 8, height: 8)
+                                    Text(category.rawValue.capitalized)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                Button("✕") {
+                    withAnimation(.easeInOut) {
+                        showBoothDetails = false
+                        selectedBoothForDestination = nil
+                    }
+                }
+                .font(.title2)
+                .foregroundColor(.secondary)
+            }
+            
+            HStack(spacing: 12) {
+                Button("Set as Destination") {
+                    withAnimation(.easeInOut) {
+                        pathfinding.selectBoothAsDestination(booth)
+                        showBoothDetails = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                
+                Button("Cancel") {
+                    withAnimation(.easeInOut) {
+                        showBoothDetails = false
+                        selectedBoothForDestination = nil
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .background(.regularMaterial)
+        .cornerRadius(12)
+        .shadow(radius: 3)
+    }
 
-#Preview {
-    EventMapView()
+    // Helper function to get all walkable positions
+    private func getAllWalkablePositions() -> [GridPosition] {
+        var walkablePositions: [GridPosition] = []
+        
+        // Iterate through all possible grid positions
+        for x in 0..<totalMapWidth {
+            for y in 0..<totalMapHeight {
+                let position = GridPosition(x: x, y: y)
+                
+                // Check if this position is walkable using the pathfinding graph
+                if let _ = pathfinding.gridGraph.node(atGridPosition: vector_int2(Int32(x), Int32(y))) {
+                    walkablePositions.append(position)
+                }
+            }
+        }
+        
+        return walkablePositions
+    }
 }

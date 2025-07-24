@@ -1,8 +1,9 @@
 import Foundation
 import GameplayKit
+import simd  // Add this import for vector_int2
 
 class EventMapPathfinding: NSObject, ObservableObject {
-    private var gridGraph: GKGridGraph<GKGridGraphNode>
+    var gridGraph: GKGridGraph<GKGridGraphNode>  // Change from private to public
     private let gridWidth: Int32
     private let gridHeight: Int32
     var crowdData: CrowdData // Change from private var to var so it can be accessed
