@@ -144,33 +144,35 @@ struct EventMapView: View {
     // Path overlay - fix both line and checkpoint positioning
     private var pathOverlay: some View {
         ZStack {
-            // Draw path lines - shift up by half a grid
-            if pathfinding.currentPath.count > 1 {
-                ForEach(0..<pathfinding.currentPath.count - 1, id: \.self) { index in
-                    let currentNode = pathfinding.currentPath[index]
-                    let nextNode = pathfinding.currentPath[index + 1]
+            // Draw lines between path points (non-interactive)
+            ZStack {
+                ForEach(0..<max(0, pathfinding.currentPath.count - 1), id: \.self) { index in
+                    let startNode = pathfinding.currentPath[index]
+                    let endNode = pathfinding.currentPath[index + 1]
                     
-                    let startX = CGFloat(currentNode.gridPosition.x) * gridSize + gridSize/2
-                    let startY = CGFloat(currentNode.gridPosition.y) * gridSize  // Remove the + gridSize/2 here
-                    let endX = CGFloat(nextNode.gridPosition.x) * gridSize + gridSize/2
-                    let endY = CGFloat(nextNode.gridPosition.y) * gridSize  // Remove the + gridSize/2 here
+                    let isCompleted = completedPathIndices.contains(index)
+                    let lineColor = isCompleted ? Color.gray : Color.blue
+                    
+                    let startPos = CGPoint(
+                        x: CGFloat(startNode.gridPosition.x) * gridSize + gridSize/2,
+                        y: CGFloat(startNode.gridPosition.y) * gridSize // Removed + gridSize/2 to shift up
+                    )
+                    let endPos = CGPoint(
+                        x: CGFloat(endNode.gridPosition.x) * gridSize + gridSize/2,
+                        y: CGFloat(endNode.gridPosition.y) * gridSize // Removed + gridSize/2 to shift up
+                    )
                     
                     Path { path in
-                        let startPoint = CGPoint(x: startX, y: startY)
-                        let endPoint = CGPoint(x: endX, y: endY)
-                        
-                        path.move(to: startPoint)
-                        path.addLine(to: endPoint)
+                        path.move(to: startPos)
+                        path.addLine(to: endPos)
                     }
-                    .stroke(
-                        completedPathIndices.contains(index) ? Color.gray : Color.blue,
-                        lineWidth: 4
-                    )
+                    .stroke(lineColor, lineWidth: 3)
                     .opacity(0.8)
                 }
             }
+            .allowsHitTesting(false) // Lines don't need to be tappable
             
-            // Draw checkpoint dots only at direction changes, start, and end
+            // Draw checkpoints at direction changes (interactive)
             ForEach(Array(getDirectionChangeIndices().enumerated()), id: \.offset) { arrayIndex, pathIndex in
                 let node = pathfinding.currentPath[pathIndex]
                 let isCompleted = completedPathIndices.contains(pathIndex)
@@ -178,7 +180,7 @@ struct EventMapView: View {
                 let fillColor = isCompleted ? Color.gray : (isLastCheckpoint ? Color.red : Color.blue)
                 
                 let xPos = CGFloat(node.gridPosition.x) * gridSize + gridSize/2
-                let yPos = CGFloat(node.gridPosition.y) * gridSize  // Already corrected
+                let yPos = CGFloat(node.gridPosition.y) * gridSize // Removed + gridSize/2 to shift up
                 
                 Circle()
                     .fill(fillColor)
@@ -273,7 +275,7 @@ struct EventMapView: View {
                     .foregroundColor(.green)
                     .position(
                         x: CGFloat(startPoint.x) * gridSize + gridSize/2,
-                        y: CGFloat(startPoint.y) * gridSize  // Remove the + gridSize/2 here
+                        y: CGFloat(startPoint.y) * gridSize // Removed + gridSize/2 to shift up
                     )
             }
             
@@ -284,10 +286,11 @@ struct EventMapView: View {
                     .foregroundColor(.red)
                     .position(
                         x: CGFloat(endPoint.x) * gridSize + gridSize/2,
-                        y: CGFloat(endPoint.y) * gridSize  // Remove the + gridSize/2 here
+                        y: CGFloat(endPoint.y) * gridSize // Removed + gridSize/2 to shift up
                     )
             }
         }
+        .allowsHitTesting(false) // Add this line to disable touch interaction
     }
     
     // Hall grids
@@ -329,7 +332,7 @@ struct EventMapView: View {
         return x >= leftPadding && x < rightBound && y >= config.yStart && y <= config.yEnd
     }
     
-    // Booths overlay - updated with category filtering
+    // Booths overlay - updated to remove crowd level indicators
     private var boothsOverlay: some View {
         ZStack {
             ForEach(filteredBooths) { booth in
@@ -341,158 +344,75 @@ struct EventMapView: View {
                         )
                 }
             }
+            
+            // Add CCTV overlay
+            cctvOverlay
         }
         .frame(width: CGFloat(totalMapWidth) * gridSize, 
                height: CGFloat(totalMapHeight) * gridSize)
     }
     
-    // Filtered booths based on selected category (single selection)
-    private var filteredBooths: [Booth] {
-        if let selectedCategory = selectedCategory {
-            return crowdData.booths.filter { booth in
-                booth.categories.contains(selectedCategory)
-            }
-        } else {
-            return crowdData.booths
-        }
-    }
-    
-    // Category filter button - updated for single selection
-    private var categoryFilterButton: some View {
-        Button(action: {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                showCategoryFilter.toggle()
-            }
-        }) {
-            HStack(spacing: 8) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 18))
-                Text("Filter")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                if selectedCategory != nil {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
-            .cornerRadius(20)
-            .shadow(radius: 3)
-        }
-    }
-    
-    // Category filter panel - updated for single selection
-    private var categoryFilterPanel: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("Filter by Category")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                Button("Clear Filter") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        selectedCategory = nil
-                    }
-                }
-                .font(.caption)
-                .foregroundColor(.red)
-                .disabled(selectedCategory == nil)
-            }
-            
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                ForEach(BoothCategory.allCases, id: \.self) { category in
-                    categoryFilterChip(category: category)
-                }
-            }
-            
-            // Statistics - updated for single category
-            HStack {
-                Text("Showing \(filteredBooths.count) of \(crowdData.booths.count) booths")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-        }
-        .padding()
-        .background(.regularMaterial)
-        .cornerRadius(16)
-        .shadow(radius: 5)
-    }
-    
-    // Individual category filter chip - updated for single selection
-    private func categoryFilterChip(category: BoothCategory) -> some View {
-        let isSelected = selectedCategory == category
-        let boothCount = crowdData.getBooths(for: category).count
-        
-        return Button(action: {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                if isSelected {
-                    selectedCategory = nil // Deselect if already selected
-                } else {
-                    selectedCategory = category // Select this category (automatically deselects others)
-                }
-            }
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: categoryIcon(for: category))
-                    .font(.system(size: 14))
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(category.rawValue.capitalized)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    Text("\(boothCount) booths")
-                        .font(.caption2)
-                        .opacity(0.7)
-                }
-                
-                Spacer()
-                
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
+    // New CCTV overlay
+    private var cctvOverlay: some View {
+        ZStack {
+            ForEach(crowdData.cctvs) { cctv in
+                VStack(spacing: 2) {
+                    // CCTV icon
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.black)
+                        .background(Circle().fill(Color.white).frame(width: 16, height: 16))
+                    
+                    // People count
+                    Text("\(cctv.peopleCount)")
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(crowdColorForCount(cctv.peopleCount))
+                        .cornerRadius(4)
+                }
+                .position(
+                    x: CGFloat(cctv.position.x) * gridSize + gridSize/2,
+                    y: CGFloat(cctv.position.y) * gridSize
+                )
+            }
+            
+            // Pathway crowd visualization
+            pathwayCrowdOverlay
+        }
+        .allowsHitTesting(false) // Add this line to disable touch interaction
+    }
+    
+    // Pathway crowd visualization
+    private var pathwayCrowdOverlay: some View {
+        ZStack {
+            ForEach(crowdData.cctvs) { cctv in
+                ForEach(cctv.monitoredPathway, id: \.self) { position in
+                    Rectangle()
+                        .fill(crowdColorForCount(cctv.peopleCount).opacity(0.3))
+                        .frame(width: gridSize, height: gridSize)
+                        .position(
+                            x: CGFloat(position.x) * gridSize + gridSize/2,
+                            y: CGFloat(position.y) * gridSize
+                        )
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(isSelected ? categoryColor(for: category) : Color(.systemGray6))
-            .foregroundColor(isSelected ? .white : .primary)
-            .cornerRadius(12)
         }
-        .buttonStyle(PlainButtonStyle())
+        .allowsHitTesting(false) // Add this line to disable touch interaction
     }
     
-    // Category icons
-    private func categoryIcon(for category: BoothCategory) -> String {
-        switch category {
-        case .bodycare: return "figure.arms.open"
-        case .haircare: return "comb"
-        case .lipcare: return "mouth"
-        case .makeup: return "paintbrush"
-        case .perfume: return "drop"
-        case .skincare: return "face.smiling"
+    // Color based on people count
+    private func crowdColorForCount(_ count: Int) -> Color {
+        switch count {
+        case 0...5: return .green      // Low crowd
+        case 6...10: return .yellow    // Medium crowd
+        case 11...15: return .orange   // High crowd
+        default: return .red           // Very high crowd
         }
     }
-    
-    // Category colors
-    private func categoryColor(for category: BoothCategory) -> Color {
-        switch category {
-        case .bodycare: return .blue
-        case .haircare: return .brown
-        case .lipcare: return .pink
-        case .makeup: return .purple
-        case .perfume: return .orange
-        case .skincare: return .green
-        }
-    }
-    
-    // Updated booth view for single category filtering
+
+    // Updated booth view - removed crowd level indicator
     private func boothView(booth: Booth) -> some View {
         let is2x2Booth = booth.name.contains("2x2")
         let boothSize = is2x2Booth ? gridSize * 2 : gridSize
@@ -524,13 +444,7 @@ struct EventMapView: View {
                     
                     Spacer()
                     
-                    // Crowd level indicator (bottom)
-                    Rectangle()
-                        .fill(crowdIndicatorColor(level: booth.crowdLevel))
-                        .frame(height: 4)
-                        .cornerRadius(2)
-                        .padding(.horizontal, 2)
-                        .padding(.bottom, 2)
+                    // Removed crowd level indicator section
                 }
             )
             .onTapGesture {
@@ -829,10 +743,102 @@ struct EventMapView: View {
         } else {
             // Regular checkpoint tapped - mark previous segments as grey
             withAnimation(.easeInOut(duration: 0.3)) {
-                for i in 0...index {
+                // Mark all line segments up to (but not including) this checkpoint as completed
+                // Line segments are indexed from 0 to pathfinding.currentPath.count - 2
+                // When you tap checkpoint at index i, you want to mark line segments 0 to i-1 as completed
+                for i in 0..<index {
                     completedPathIndices.insert(i)
                 }
             }
+        }
+    }
+    
+    // Add these missing properties and functions to your EventMapView struct:
+
+    // Add this computed property for filtered booths
+    private var filteredBooths: [Booth] {
+        crowdData.getBooths()
+    }
+
+    // Add the missing category filter button
+    private var categoryFilterButton: some View {
+        Button(action: {
+            withAnimation(.easeInOut) {
+                showCategoryFilter.toggle()
+            }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "line.horizontal.3.decrease.circle")
+                    .font(.system(size: 18))
+                Text("Filter")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.thinMaterial)
+            .cornerRadius(20)
+            .shadow(radius: 3)
+        }
+    }
+
+    // Add the missing category filter panel
+    private var categoryFilterPanel: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Filter by Category")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Clear") {
+                    selectedCategory = nil
+                }
+                .font(.subheadline)
+                .foregroundColor(.blue)
+            }
+            
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
+                ForEach(BoothCategory.allCases, id: \.self) { category in
+                    Button(action: {
+                        selectedCategory = selectedCategory == category ? nil : category
+                    }) {
+                        VStack(spacing: 4) {
+                            Circle()
+                                .fill(categoryColor(for: category))
+                                .frame(width: 20, height: 20)
+                            
+                            Text(category.rawValue.capitalized)
+                                .font(.caption)
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 4)
+                        .background(
+                            selectedCategory == category ? 
+                            Color.blue.opacity(0.2) : Color.clear
+                        )
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding()
+        .background(.regularMaterial)
+        .cornerRadius(12)
+        .shadow(radius: 3)
+    }
+
+    // Add the missing category color function
+    private func categoryColor(for category: BoothCategory) -> Color {
+        switch category {
+        case .bodycare: return .purple
+        case .haircare: return .brown
+        case .lipcare: return .pink
+        case .makeup: return .red
+        case .perfume: return .mint
+        case .skincare: return .cyan
         }
     }
 }
