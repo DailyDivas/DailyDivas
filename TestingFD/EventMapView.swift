@@ -509,6 +509,7 @@ struct HallLabelsComponent: View {
                 }
             }
         }
+        .allowsHitTesting(false) // Add this line to prevent blocking touch events
     }
 }
 
@@ -607,7 +608,7 @@ struct EventMapView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 40)
+            .padding(.bottom, 56)
         }
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showBoothList) {
@@ -630,14 +631,15 @@ struct EventMapView: View {
                 isNavigationActive = true
             }
         }) {
-            Image(systemName: "play.fill")
-                .font(.system(size: 24, weight: .medium))
+            Text("Start Navigation")
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.white)
-                .frame(width: 56, height: 56)
-                .background(Color.green)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
         }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(Color(red: 0.859, green: 0.157, blue: 0.306))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+        .padding(.leading, 24)
     }
     
     // Update the route selector component
@@ -703,7 +705,7 @@ struct EventMapView: View {
         .background(Color.white)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-        .padding(.top, 24)
+        .padding(.top, 48)
         .padding(.horizontal, 56)
     }
     
@@ -1299,6 +1301,17 @@ extension EventMapView {
                 zoomedSection: zoomedSection
             )
             
+            // Hall labels should be below interactive elements
+            HallLabelsComponent(
+                hallConfigs: pathfinding.getAllHallConfigs(),
+                gridSize: gridSize,
+                totalMapWidth: totalMapWidth,
+                shouldShowHall: { _ in true }
+            )
+            .zIndex(0)
+            .allowsHitTesting(false)
+            
+            // Path visualization should be on top for interaction
             if !pathfinding.currentPath.isEmpty {
                 PathVisualizationComponent(
                     pathfinding: pathfinding,
@@ -1307,6 +1320,7 @@ extension EventMapView {
                     isNavigationActive: isNavigationActive,
                     onCheckpointTap: handleCheckpointTap
                 )
+                .zIndex(1)
             }
             
             StartPointOverlayComponent(
@@ -1342,13 +1356,6 @@ extension EventMapView {
                 startPoint: pathfinding.startPoint,
                 endPoint: pathfinding.endPoint,
                 gridSize: gridSize
-            )
-            
-            HallLabelsComponent(
-                hallConfigs: pathfinding.getAllHallConfigs(),
-                gridSize: gridSize,
-                totalMapWidth: totalMapWidth,
-                shouldShowHall: { _ in true }
             )
         }
         .frame(width: CGFloat(totalMapWidth) * gridSize, 
@@ -1426,6 +1433,7 @@ extension EventMapView {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
         }
+        .padding(.leading, 56)
     }
     
     // Missing map navigation button
@@ -1447,20 +1455,21 @@ extension EventMapView {
             // Options panel
             if showMapOptions {
                 VStack(spacing: 8) {
-                    mapOptionButton(title: "Hall C", action: { switchToHall(.hallC) })
-                    mapOptionButton(title: "Hall B", action: { switchToHall(.hallB) })
-                    mapOptionButton(title: "Hall A", action: { switchToHall(.hallA) })
                     mapOptionButton(title: "Fit to Screen", action: { switchToHall(.none) })
+                    mapOptionButton(title: "Hall A", action: { switchToHall(.hallA) })
+                    mapOptionButton(title: "Hall B", action: { switchToHall(.hallB) })
+                    mapOptionButton(title: "Hall C", action: { switchToHall(.hallC) })
                 }
                 .padding(12)
                 .frame(width: 120)
                 .background(Color(red: 0.859, green: 0.157, blue: 0.306))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-                .position(x: 60, y: -100)
+                .position(x: 38, y: -100)
             }
         }
         .frame(width: 120, height: 56)
+        .padding(.trailing, 20)
     }
     
     // Missing map option button helper
