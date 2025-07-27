@@ -88,7 +88,7 @@ class CrowdData: ObservableObject {
         // First column - 1x1 booths (leftmost column of Hall C)
         for y in 0...7 {
             var booth = Booth(
-                name: "C-1x1-\(newBooths.count + 1)",
+                name: "C\(y + 1)-1x1",
                 gridPosition: GridPosition(x: hallCStartX, y: y),
                 hall: .hallC
             )
@@ -99,7 +99,7 @@ class CrowdData: ObservableObject {
         // Columns 2-3: 2x2 booths
         for y in stride(from: 0, through: 6, by: 2) {
             var booth = Booth(
-                name: "C-2x2-\(newBooths.count + 1)",
+                name: "C\((y/2) + 1)-2x2",
                 gridPosition: GridPosition(x: hallCStartX + 2, y: y),
                 hall: .hallC
             )
@@ -110,7 +110,7 @@ class CrowdData: ObservableObject {
         // Columns 5-6: 2x2 booths
         for y in stride(from: 0, through: 6, by: 2) {
             var booth = Booth(
-                name: "C-2x2-\(newBooths.count + 1)",
+                name: "C\((y/2) + 5)-2x2",
                 gridPosition: GridPosition(x: hallCStartX + 5, y: y),
                 hall: .hallC
             )
@@ -121,7 +121,7 @@ class CrowdData: ObservableObject {
         // Last column - 1x1 booths (rightmost column of Hall C)
         for y in 0...7 {
             var booth = Booth(
-                name: "C-1x1-\(newBooths.count + 1)",
+                name: "C\(y + 9)-1x1",
                 gridPosition: GridPosition(x: hallCStartX + 8, y: y),
                 hall: .hallC
             )
@@ -132,7 +132,7 @@ class CrowdData: ObservableObject {
         // Hall B booths (y: 9-14, 12 wide, full width)
         for y in 9...14 {
             var booth = Booth(
-                name: "B-1x1-\(newBooths.count + 1)",
+                name: "B\(y - 8)-1x1",
                 gridPosition: GridPosition(x: 0, y: y),
                 hall: .hallB
             )
@@ -142,7 +142,7 @@ class CrowdData: ObservableObject {
         
         for y in stride(from: 9, through: 13, by: 2) {
             var booth = Booth(
-                name: "B-2x2-\(newBooths.count + 1)",
+                name: "B\((y - 9)/2 + 7)-2x2",
                 gridPosition: GridPosition(x: 2, y: y),
                 hall: .hallB
             )
@@ -152,7 +152,7 @@ class CrowdData: ObservableObject {
         
         for y in stride(from: 9, through: 13, by: 2) {
             var booth = Booth(
-                name: "B-2x2-\(newBooths.count + 1)",
+                name: "B\((y - 9)/2 + 10)-2x2",
                 gridPosition: GridPosition(x: 5, y: y),
                 hall: .hallB
             )
@@ -162,7 +162,7 @@ class CrowdData: ObservableObject {
         
         for y in 9...14 {
             var booth = Booth(
-                name: "B-1x1-\(newBooths.count + 1)",
+                name: "B\(y - 8 + 6)-1x1",
                 gridPosition: GridPosition(x: 8, y: y),
                 hall: .hallB
             )
@@ -172,7 +172,7 @@ class CrowdData: ObservableObject {
         
         for y in 9...14 {
             var booth = Booth(
-                name: "B-1x1-\(newBooths.count + 1)",
+                name: "B\(y - 8 + 12)-1x1",
                 gridPosition: GridPosition(x: 10, y: y),
                 hall: .hallB
             )
@@ -185,7 +185,7 @@ class CrowdData: ObservableObject {
         
         for y in 16...21 {
             var booth = Booth(
-                name: "A-1x1-\(newBooths.count + 1)",
+                name: "A\(y - 15)-1x1",
                 gridPosition: GridPosition(x: hallAStartX, y: y),
                 hall: .hallA
             )
@@ -195,7 +195,7 @@ class CrowdData: ObservableObject {
         
         for y in stride(from: 16, through: 20, by: 2) {
             var booth = Booth(
-                name: "A-2x2-\(newBooths.count + 1)",
+                name: "A\((y - 16)/2 + 7)-2x2",
                 gridPosition: GridPosition(x: hallAStartX + 2, y: y),
                 hall: .hallA
             )
@@ -205,7 +205,7 @@ class CrowdData: ObservableObject {
         
         for y in stride(from: 16, through: 20, by: 2) {
             var booth = Booth(
-                name: "A-2x2-\(newBooths.count + 1)",
+                name: "A\((y - 16)/2 + 10)-2x2",
                 gridPosition: GridPosition(x: hallAStartX + 5, y: y),
                 hall: .hallA
             )
@@ -215,12 +215,28 @@ class CrowdData: ObservableObject {
         
         for y in 16...21 {
             var booth = Booth(
-                name: "A-1x1-\(newBooths.count + 1)",
+                name: "A\(y - 15 + 6)-1x1",
                 gridPosition: GridPosition(x: hallAStartX + 8, y: y),
                 hall: .hallA
             )
             booth.categories = generateRandomCategories()
             newBooths.append(booth)
+        }
+        
+        // Randomly select 4 booths to rename with custom names
+        let customNames = ["Niveo", "Vaselon", "Erho", "Skintipis"]
+        let selectedIndices = Array(0..<newBooths.count).shuffled().prefix(4)
+        
+        for (index, boothIndex) in selectedIndices.enumerated() {
+            let originalSize = newBooths[boothIndex].name.contains("2x2") ? "2x2" : "1x1"
+            newBooths[boothIndex] = Booth(
+                name: "\(customNames[index])-\(originalSize)",
+                gridPosition: newBooths[boothIndex].gridPosition,
+                hall: newBooths[boothIndex].hall,
+                isActive: newBooths[boothIndex].isActive,
+                beaconUUID: newBooths[boothIndex].beaconUUID,
+                categories: newBooths[boothIndex].categories
+            )
         }
         
         self.booths = newBooths
