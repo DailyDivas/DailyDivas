@@ -541,6 +541,8 @@ struct EventMapView: View {
     @State private var routeSelectorMode: RouteSelectorMode = .destination
     @State private var isNavigationActive = false // Add this new state
     @State private var isSelectingStartPoint = false // Add this state
+    @State private var directionTexts: [String] = []
+    @State private var directionCheckpointIndices: [Int] = [] // Add this to track which checkpoint corresponds to each direction
 
     // Add enum for route selector modes
     enum RouteSelectorMode {
@@ -551,96 +553,6 @@ struct EventMapView: View {
     private let gridSize: CGFloat = 40
     private let totalMapWidth: Int = 12
     private let totalMapHeight: Int = 22
-    
-    var body: some View {
-        ZStack {
-            mapContent
-                .scaleEffect(currentScale)
-                .offset(currentOffset)
-                .gesture(mapGestures)
-            
-            VStack {
-                // Only show route selector when navigation is not active
-                if !isNavigationActive {
-                    routeSelector
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-                }
-                
-                if showBoothDetails, let selectedBooth = selectedBoothForDestination {
-                    boothDetailsPanel(for: selectedBooth)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 16)
-                }
-                
-                if pathfinding.endPoint != nil || pathfinding.startPoint != nil {
-                    pathfindingInstructions
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 4)
-                }
-                
-                if showCategoryFilter {
-                    categoryFilterPanel
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 16)
-                }
-                
-                Spacer()
-            }
-            .padding(.vertical, 8)
-            
-            // Updated navigation buttons - only show crowd info when navigation is not active
-            VStack {
-                Spacer()
-                HStack {
-                    // Only show crowd info button when navigation is not active
-                    if !isNavigationActive {
-                        crowdInfoButton
-                    }
-                    
-                    // Add start navigation button when both points are set
-                    if pathfinding.startPoint != nil && pathfinding.endPoint != nil && !isNavigationActive {
-                        startNavigationButton
-                    }
-                    
-                    Spacer()
-                    mapNavigationButton
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 56)
-        }
-        .background(Color(.systemGroupedBackground))
-        .sheet(isPresented: $showBoothList) {
-            BoothListSheet(
-                booths: crowdData.getBooths(),
-                mode: routeSelectorMode,
-                onBoothSelected: { booth in
-                    showBoothList = false
-                    handleRouteSelection(booth)
-                }
-            )
-            .presentationDragIndicator(.visible) // Move this here, outside the sheet content
-        }
-    }
-    
-    // Add the new start navigation button
-    private var startNavigationButton: some View {
-        Button(action: {
-            withAnimation(.easeInOut) {
-                isNavigationActive = true
-            }
-        }) {
-            Text("Start Navigation")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-        }
-        .frame(maxWidth: .infinity, minHeight: 56)
-        .background(Color(red: 0.859, green: 0.157, blue: 0.306))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-        .padding(.leading, 24)
-    }
     
     // Update the route selector component
     private var routeSelector: some View {
@@ -1000,6 +912,7 @@ struct EventMapView: View {
         .padding(.horizontal, 56)
     }
     
+    // Update the pathfindingInstructions to only show "Start Navigation" button, not directions
     private var pathfindingInstructions: some View {
         VStack(spacing: 8) {
             if pathfinding.endPoint == nil && pathfinding.startPoint == nil {
@@ -1047,29 +960,6 @@ struct EventMapView: View {
                     }
                 }
             }
-//            else {
-//                VStack(spacing: 4) {
-//                    HStack {
-//                        Image(systemName: "location.fill")
-//                            .foregroundColor(.blue)
-//                        Text("Navigation active!")
-//                            .font(.subheadline)
-//                            .foregroundColor(.primary)
-//                            .fontWeight(.medium)
-//                    }
-//                    
-//                    HStack {
-//                        Image(systemName: "hand.tap.fill")
-//                            .foregroundColor(.blue)
-//                            .font(.caption)
-//                        Text("Tap blue dots to mark progress • Tap red dot to finish")
-//                            .font(.caption)
-//                            .foregroundColor(.secondary)
-//                    }
-//                }
-//                .padding()
-//                .padding(.top, 56)
-//            }
         }
         .padding()
         .background(.regularMaterial)
@@ -1078,25 +968,297 @@ struct EventMapView: View {
         .padding(.horizontal, 56)
     }
     
-    private func resetMapPosition() {
-        withAnimation(.easeInOut) {
-            scale = 1.0
-            offset = .zero
-            lastOffset = .zero
-            zoomedSection = .none
+    // Update the body to show directions only during navigation
+    var body: some View {
+        ZStack {
+            mapContent
+                .scaleEffect(currentScale)
+                .offset(currentOffset)
+                .gesture(mapGestures)
+            
+            VStack {
+                // Only show route selector when navigation is not active
+                if !isNavigationActive {
+                    routeSelector
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                }
+                
+                if showBoothDetails, let selectedBooth = selectedBoothForDestination {
+                    boothDetailsPanel(for: selectedBooth)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(.horizontal, 16)
+                }
+                
+                if pathfinding.endPoint != nil || pathfinding.startPoint != nil {
+                    pathfindingInstructions
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(.horizontal, 4)
+                }
+                
+                // Show directions panel only during active navigation and when directions exist
+                if isNavigationActive && !directionTexts.isEmpty {
+                    directionsPanel
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+                
+                if showCategoryFilter {
+                    categoryFilterPanel
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(.horizontal, 16)
+                }
+                
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            
+            // Updated navigation buttons - only show crowd info when navigation is not active
+            VStack {
+                Spacer()
+                HStack {
+                    // Only show crowd info button when navigation is not active
+                    if !isNavigationActive {
+                        crowdInfoButton
+                    }
+                    
+                    // Add start navigation button when both points are set
+                    if pathfinding.startPoint != nil && pathfinding.endPoint != nil && !isNavigationActive {
+                        startNavigationButton
+                    }
+                    
+                    Spacer()
+                    mapNavigationButton
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 56)
+        }
+        .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $showBoothList) {
+            BoothListSheet(
+                booths: crowdData.getBooths(),
+                mode: routeSelectorMode,
+                onBoothSelected: { booth in
+                    showBoothList = false
+                    handleRouteSelection(booth)
+                }
+            )
+            .presentationDragIndicator(.visible)
         }
     }
     
-    private func zoomIn() {
-        withAnimation(.easeInOut) {
-            scale = min(3.0, scale * 1.3)
+    // Update the start navigation button to generate directions when navigation starts
+    private var startNavigationButton: some View {
+        Button(action: {
+            withAnimation(.easeInOut) {
+                isNavigationActive = true
+                generateDirectionTexts() // Generate directions when navigation starts
+            }
+        }) {
+            Text("Start Navigation")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(Color(red: 0.859, green: 0.157, blue: 0.306))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+        .padding(.leading, 24)
+    }
+    
+    // Update the directions panel to show remaining directions
+    private var directionsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Navigation Directions")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("End Navigation") {
+                    withAnimation(.easeInOut) {
+                        endNavigation()
+                    }
+                }
+                .font(.subheadline)
+                .foregroundColor(.red)
+            }
+            
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(getActiveDirections().enumerated()), id: \.offset) { index, directionInfo in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(index + 1).")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .frame(width: 20, alignment: .leading)
+                            
+                            Text(directionInfo.text)
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.leading)
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(6)
+                    }
+                    
+                    if getActiveDirections().isEmpty {
+                        Text("🎉 You have arrived at your destination!")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.green)
+                            .padding()
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                }
+            }
+            .frame(maxHeight: 200)
+        }
+        .padding()
+        .background(.regularMaterial)
+        .cornerRadius(12)
+        .shadow(radius: 3)
+        .padding(.horizontal, 16)
+    }
+    
+    // Add helper function to get active (not completed) directions
+    private func getActiveDirections() -> [(text: String, checkpointIndex: Int)] {
+        var activeDirections: [(text: String, checkpointIndex: Int)] = []
+        
+        for (index, directionText) in directionTexts.enumerated() {
+            if index < directionCheckpointIndices.count {
+                let checkpointIndex = directionCheckpointIndices[index]
+                // Only show directions for checkpoints that haven't been completed yet
+                if !completedPathIndices.contains(checkpointIndex) {
+                    activeDirections.append((text: directionText, checkpointIndex: checkpointIndex))
+                }
+            }
+        }
+        
+        return activeDirections
+    }
+    
+    // Update generateDirectionTexts to also track checkpoint indices
+    private func generateDirectionTexts() {
+        directionTexts.removeAll()
+        directionCheckpointIndices.removeAll()
+        
+        let path = pathfinding.currentPath
+        guard path.count >= 2 else { return }
+        
+        // Get the direction change indices to map directions to checkpoints
+        let checkpointIndices = getDirectionChangeIndices()
+        
+        var i = 0
+        var directionIndex = 0
+        
+        while i < path.count - 2 {
+            let start = path[i].gridPosition
+            let mid = path[i + 1].gridPosition
+            var next = path[i + 2].gridPosition
+            
+            var direction = directionVector(from: start, to: mid)
+            var endIndex = i + 2
+            
+            // Combine straight steps until direction changes
+            while endIndex < path.count {
+                let current = path[endIndex - 1].gridPosition
+                let upcoming = path[endIndex].gridPosition
+                let newDirection = directionVector(from: current, to: upcoming)
+                
+                if newDirection != direction {
+                    break
+                }
+                next = upcoming
+                endIndex += 1
+            }
+            
+            let booth = boothNear(position: next)
+            let boothText = booth != nil ? "sampai booth \(booth!.name)" : "ke area sekitar"
+            directionTexts.append("Lurus \(boothText)")
+            
+            // Map this direction to the appropriate checkpoint
+            if directionIndex < checkpointIndices.count {
+                directionCheckpointIndices.append(checkpointIndices[directionIndex])
+            }
+            
+            // Add turn instruction
+            if endIndex < path.count {
+                let prev = path[endIndex - 2].gridPosition
+                let current = path[endIndex - 1].gridPosition
+                let after = path[endIndex].gridPosition
+                
+                let turn = getTurnOnly(prev: prev, current: current, next: after)
+                let directionVec = directionVector(from: current, to: after)
+                
+                // Get booth that is 2 steps after the turn
+                if let boothTarget = boothInDirection(from: current, direction: directionVec, steps: 2) {
+                    directionTexts.append("Lalu \(turn) ke arah booth \(boothTarget.name)")
+                } else {
+                    directionTexts.append("Lalu \(turn) ke area sekitar")
+                }
+                
+                // Map this turn direction to the next checkpoint
+                directionIndex += 1
+                if directionIndex < checkpointIndices.count {
+                    directionCheckpointIndices.append(checkpointIndices[directionIndex])
+                }
+            }
+            
+            i = endIndex - 1
+            directionIndex += 1
         }
     }
     
-    private func zoomOut() {
-        withAnimation(.easeInOut) {
-            scale = max(0.5, scale / 1.3)
+    private func boothInDirection(from position: simd_int2, direction: simd_int2, steps: Int = 2) -> Booth? {
+        var searchPos = position
+        for _ in 0..<steps {
+            searchPos = simd_int2(x: searchPos.x + direction.x, y: searchPos.y + direction.y)
         }
+        return boothNear(position: searchPos)
+    }
+    
+    private func directionVector(from: simd_int2, to: simd_int2) -> simd_int2 {
+        return simd_int2(x: to.x - from.x, y: to.y - from.y)
+    }
+    
+    private func getTurnOnly(prev: simd_int2, current: simd_int2, next: simd_int2) -> String {
+        let dx1 = current.x - prev.x
+        let dy1 = current.y - prev.y
+        let dx2 = next.x - current.x
+        let dy2 = next.y - current.y
+        
+        let cross = -(dx1 * dy2 - dy1 * dx2)
+        
+        if cross > 0 {
+            return "belok kiri"
+        } else if cross < 0 {
+            return "belok kanan"
+        } else {
+            return "lurus"
+        }
+    }
+    
+    private func boothNear(position: simd_int2) -> Booth? {
+        let maxDistance = 2
+        
+        return crowdData.booths
+            .filter { booth in
+                let dx = Int(booth.gridPosition.x) - Int(position.x)
+                let dy = Int(booth.gridPosition.y) - Int(position.y)
+                return abs(dx) <= maxDistance && abs(dy) <= maxDistance
+            }
+            .sorted {
+                let dx1 = Int($0.gridPosition.x) - Int(position.x)
+                let dy1 = Int($0.gridPosition.y) - Int(position.y)
+                let dx2 = Int($1.gridPosition.x) - Int(position.x)
+                let dy2 = Int($1.gridPosition.y) - Int(position.y)
+                return dx1 * dx1 + dy1 * dy1 < dx2 * dx2 + dy2 * dy2
+            }
+            .first
     }
 }
 
@@ -1321,6 +1483,39 @@ struct BoothListSheet: View {
 
 extension EventMapView {
     
+    // Add the missing getDirectionChangeIndices function
+    private func getDirectionChangeIndices() -> [Int] {
+        guard pathfinding.currentPath.count > 2 else {
+            return Array(0..<pathfinding.currentPath.count)
+        }
+        
+        var indices: [Int] = []
+        indices.append(0)
+        
+        for i in 1..<pathfinding.currentPath.count - 1 {
+            let prevNode = pathfinding.currentPath[i - 1]
+            let currentNode = pathfinding.currentPath[i]
+            let nextNode = pathfinding.currentPath[i + 1]
+            
+            let directionToCurrent = (
+                x: currentNode.gridPosition.x - prevNode.gridPosition.x,
+                y: currentNode.gridPosition.y - prevNode.gridPosition.y
+            )
+            
+            let directionFromCurrent = (
+                x: nextNode.gridPosition.x - currentNode.gridPosition.x,
+                y: nextNode.gridPosition.y - currentNode.gridPosition.y
+            )
+            
+            if directionToCurrent.x != directionFromCurrent.x || directionToCurrent.y != directionFromCurrent.y {
+                indices.append(i)
+            }
+        }
+        
+        indices.append(pathfinding.currentPath.count - 1)
+        return indices
+    }
+    
     // Missing computed properties for map interaction
     private var currentScale: CGFloat {
         scale
@@ -1407,7 +1602,9 @@ extension EventMapView {
         // Clear the path and reset navigation state
         pathfinding.clearPath()
         completedPathIndices.removeAll()
-        isNavigationActive = false // Reset navigation state
+        isNavigationActive = false
+        directionTexts.removeAll() // Clear directions when ending navigation
+        directionCheckpointIndices.removeAll()
         
         // Optionally show a completion message or perform other cleanup
         print("🎉 Navigation completed successfully!")
