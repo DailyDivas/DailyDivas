@@ -1004,7 +1004,7 @@ struct EventMapView: View {
                         Image(systemName: "play.circle.fill")
                             .foregroundColor(.green)
                             .font(.caption)
-                        Text("Tap the green play button to start navigation")
+                        Text("Tap the Start Navigation Button to Start")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
