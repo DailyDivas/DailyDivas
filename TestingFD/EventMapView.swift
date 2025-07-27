@@ -805,15 +805,52 @@ struct EventMapView: View {
     private func switchToHall(_ section: ZoomSection) {
         withAnimation(.easeInOut(duration: 0.5)) {
             if section == .none {
+                // Reset to full view
                 scale = 1.0
                 lastOffset = .zero
                 offset = .zero
                 zoomedSection = .none
             } else {
-                lastOffset = .zero
-                offset = .zero
+                // Calculate the center position and zoom for each hall
+                let hallConfig = pathfinding.getAllHallConfigs().first { $0.hall == getHallFromZoomSection(section) }
+                
+                guard let config = hallConfig else { return }
+                
+                // Calculate the center of the hall in grid coordinates
+                let hallCenterY = CGFloat(config.yStart + config.yEnd) / 2.0
+                let hallCenterX = CGFloat(totalMapWidth) / 2.0 // Halls are centered horizontally
+                
+                // Convert to screen coordinates (in the original map coordinate system)
+                let targetX = hallCenterX * gridSize
+                let targetY = hallCenterY * gridSize
+                
+                // Use a more reasonable zoom level
+                let newScale: CGFloat = 1.3 // Reduced from 1.8 to 1.3
+                
+                // Get screen dimensions
+                let screenCenterX = UIScreen.main.bounds.width / 2
+                let screenCenterY = UIScreen.main.bounds.height / 2
+                
+                // Calculate offset to center the hall
+                // The formula is: screenCenter - (targetPosition * scale)
+                let offsetX = screenCenterX - (targetX * newScale) + 120 // Shift more to the left
+                let offsetY = screenCenterY - (targetY * newScale) + 100 // Add some vertical adjustment for UI elements
+                
+                scale = newScale
+                offset = CGSize(width: offsetX, height: offsetY)
+                lastOffset = offset
                 zoomedSection = section
             }
+        }
+    }
+    
+    // Helper function to convert ZoomSection to Hall
+    private func getHallFromZoomSection(_ section: ZoomSection) -> Hall {
+        switch section {
+        case .hallA: return .hallA
+        case .hallB: return .hallB
+        case .hallC: return .hallC
+        case .none: return .hallA // This shouldn't be used, but providing fallback
         }
     }
     
@@ -1009,27 +1046,30 @@ struct EventMapView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            } else {
-                VStack(spacing: 4) {
-                    HStack {
-                        Image(systemName: "location.fill")
-                            .foregroundColor(.blue)
-                        Text("Navigation active!")
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                            .fontWeight(.medium)
-                    }
-                    
-                    HStack {
-                        Image(systemName: "hand.tap.fill")
-                            .foregroundColor(.blue)
-                            .font(.caption)
-                        Text("Tap blue dots to mark progress • Tap red dot to finish")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
             }
+//            else {
+//                VStack(spacing: 4) {
+//                    HStack {
+//                        Image(systemName: "location.fill")
+//                            .foregroundColor(.blue)
+//                        Text("Navigation active!")
+//                            .font(.subheadline)
+//                            .foregroundColor(.primary)
+//                            .fontWeight(.medium)
+//                    }
+//                    
+//                    HStack {
+//                        Image(systemName: "hand.tap.fill")
+//                            .foregroundColor(.blue)
+//                            .font(.caption)
+//                        Text("Tap blue dots to mark progress • Tap red dot to finish")
+//                            .font(.caption)
+//                            .foregroundColor(.secondary)
+//                    }
+//                }
+//                .padding()
+//                .padding(.top, 56)
+//            }
         }
         .padding()
         .background(.regularMaterial)
@@ -1379,12 +1419,20 @@ extension EventMapView {
             // Pan gesture
             DragGesture()
                 .onChanged { value in
+                    // If we're zoomed into a specific hall and user starts dragging, only reset the hall visibility
+                    if zoomedSection != .none {
+                        // Only reset the hall zoom state, keep the actual zoom and pan
+                        zoomedSection = .none
+                    }
+                    
+                    // Always allow normal panning behavior
                     offset = CGSize(
                         width: lastOffset.width + value.translation.width,
                         height: lastOffset.height + value.translation.height
                     )
                 }
                 .onEnded { _ in
+                    // Always update lastOffset
                     lastOffset = offset
                 },
             
