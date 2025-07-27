@@ -83,6 +83,7 @@ struct PathVisualizationComponent: View {
     let pathfinding: EventMapPathfinding
     let gridSize: CGFloat
     let completedPathIndices: Set<Int>
+    let isNavigationActive: Bool // Add this parameter
     let onCheckpointTap: (Int) -> Void
     
     var body: some View {
@@ -90,8 +91,10 @@ struct PathVisualizationComponent: View {
             // Path lines
             pathLines
             
-            // Checkpoints
-            pathCheckpoints
+            // Checkpoints - only show when navigation is active
+            if isNavigationActive {
+                pathCheckpoints
+            }
         }
     }
     
@@ -101,7 +104,7 @@ struct PathVisualizationComponent: View {
                 let startNode = pathfinding.currentPath[index]
                 let endNode = pathfinding.currentPath[index + 1]
                 
-                let isCompleted = completedPathIndices.contains(index)
+                let isCompleted = isNavigationActive && completedPathIndices.contains(index)
                 let lineColor = isCompleted ? Color.gray : Color.blue
                 
                 let startPos = CGPoint(
@@ -191,6 +194,9 @@ struct BoothsOverlayComponent: View {
     let selectedCategory: BoothCategory?
     let selectedBoothForDestination: Booth?
     let zoomedSection: ZoomSection
+    let isNavigationActive: Bool
+    let isSelectingStartPoint: Bool
+    let pathfinding: EventMapPathfinding // Add this parameter to check start/end points
     let onBoothTap: (Booth) -> Void
     
     var body: some View {
@@ -203,7 +209,17 @@ struct BoothsOverlayComponent: View {
                         selectedCategory: selectedCategory,
                         isSelectedForDestination: selectedBoothForDestination?.id == booth.id,
                         zoomedSection: zoomedSection,
-                        onTap: { onBoothTap(booth) }
+                        isNavigationActive: isNavigationActive,
+                        onTap: { 
+                            // Allow booth tapping when:
+                            // 1. Navigation is not active AND
+                            // 2. We're selecting start point OR we have start point but no destination
+                            if !isNavigationActive && (isSelectingStartPoint || (pathfinding.startPoint != nil && pathfinding.endPoint == nil)) {
+                                onBoothTap(booth)
+                            } else if !isNavigationActive {
+                                onBoothTap(booth)
+                            }
+                        }
                     )
                     .position(
                         x: CGFloat(booth.gridPosition.x) * gridSize + (booth.name.contains("2x2") ? gridSize : gridSize/2),
@@ -227,6 +243,7 @@ struct BoothView: View {
     let selectedCategory: BoothCategory?
     let isSelectedForDestination: Bool
     let zoomedSection: ZoomSection
+    let isNavigationActive: Bool
     let onTap: () -> Void
     
     var body: some View {
@@ -244,29 +261,44 @@ struct BoothView: View {
             )
             .opacity(boothOpacity(for: booth))
             .overlay(
-                VStack {
+                ZStack {
+                    // Category indicators at the top
                     if !booth.categories.isEmpty && boothSize >= gridSize {
-                        HStack(spacing: 2) {
-                            ForEach(booth.categories.prefix(2), id: \.self) { category in
-                                Circle()
-                                    .fill(categoryColor(for: category))
-                                    .frame(width: 6, height: 6)
+                        VStack {
+                            HStack(spacing: 2) {
+                                ForEach(booth.categories.prefix(2), id: \.self) { category in
+                                    Circle()
+                                        .fill(categoryColor(for: category))
+                                        .frame(width: 6, height: 6)
+                                }
                             }
+                            .padding(.top, 2)
+                            
+                            Spacer()
                         }
-                        .padding(.top, 2)
                     }
                     
-                    Spacer()
-                    
+                    // Booth name at the bottom (only when selected for destination)
                     if isSelectedForDestination && boothSize >= gridSize {
-                        Text(booth.name)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 2)
-                            .padding(.vertical, 1)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(2)
-                            .padding(.bottom, 2)
+                        VStack {
+                            Spacer()
+                            
+                            Text(booth.name)
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 2)
+                                .padding(.vertical, 1)
+                                .background(Color.black.opacity(0.7))
+                                .cornerRadius(2)
+                                .padding(.bottom, 2)
+                        }
+                    }
+                    
+                    // Disabled overlay when navigation is active - should cover the entire booth
+                    if isNavigationActive {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.3))
+                            .frame(width: boothSize, height: boothSize)
                     }
                 }
             )
@@ -294,6 +326,7 @@ struct BoothView: View {
     private func boothOpacity(for booth: Booth) -> Double {
         let baseOpacity = hallOpacity(for: booth.hall)
         
+        // Don't modify opacity during navigation since we're using an overlay instead
         if let selectedCategory = selectedCategory {
             let matchesFilter = booth.categories.contains(selectedCategory)
             return matchesFilter ? baseOpacity : baseOpacity * 0.3
@@ -500,9 +533,19 @@ struct EventMapView: View {
     @State private var selectedBoothForDestination: Booth? = nil
     @State private var showBoothDetails = false
     @State private var completedPathIndices: Set<Int> = []
-    @State private var showMapOptions = false // Add this new state
-    @State private var showCrowdInfo = false // Add this new state for crowd button
-    @State private var showBoothList = false // Add this new state for booth list sheet
+    @State private var showMapOptions = false
+    @State private var showCrowdInfo = false
+    @State private var showBoothList = false
+    @State private var showRouteSelector = false
+    @State private var routeSelectorMode: RouteSelectorMode = .destination
+    @State private var isNavigationActive = false // Add this new state
+    @State private var isSelectingStartPoint = false // Add this state
+
+    // Add enum for route selector modes
+    enum RouteSelectorMode {
+        case start
+        case destination
+    }
 
     private let gridSize: CGFloat = 40
     private let totalMapWidth: Int = 12
@@ -516,23 +559,12 @@ struct EventMapView: View {
                 .gesture(mapGestures)
             
             VStack {
-                // Add search button at the top
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        showBoothList = true
-                    }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color(red: 0.859, green: 0.157, blue: 0.306))
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-                    }
+                // Only show route selector when navigation is not active
+                if !isNavigationActive {
+                    routeSelector
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
                 
                 if showBoothDetails, let selectedBooth = selectedBoothForDestination {
                     boothDetailsPanel(for: selectedBooth)
@@ -556,11 +588,20 @@ struct EventMapView: View {
             }
             .padding(.vertical, 8)
             
-            // Add both navigation buttons
+            // Updated navigation buttons - only show crowd info when navigation is not active
             VStack {
                 Spacer()
                 HStack {
-                    crowdInfoButton
+                    // Only show crowd info button when navigation is not active
+                    if !isNavigationActive {
+                        crowdInfoButton
+                    }
+                    
+                    // Add start navigation button when both points are set
+                    if pathfinding.startPoint != nil && pathfinding.endPoint != nil && !isNavigationActive {
+                        startNavigationButton
+                    }
+                    
                     Spacer()
                     mapNavigationButton
                 }
@@ -572,212 +613,170 @@ struct EventMapView: View {
         .sheet(isPresented: $showBoothList) {
             BoothListSheet(
                 booths: crowdData.getBooths(),
+                mode: routeSelectorMode,
                 onBoothSelected: { booth in
                     showBoothList = false
-                    handleBoothTap(booth)
+                    handleRouteSelection(booth)
                 }
             )
+            .presentationDragIndicator(.visible) // Move this here, outside the sheet content
         }
     }
     
-    // Add this new computed property for the crowd info button
-    private var crowdInfoButton: some View {
+    // Add the new start navigation button
+    private var startNavigationButton: some View {
         Button(action: {
-            showCrowdInfo.toggle()
+            withAnimation(.easeInOut) {
+                isNavigationActive = true
+            }
         }) {
-            Image(systemName: "person.3.fill")
+            Image(systemName: "play.fill")
                 .font(.system(size: 24, weight: .medium))
                 .foregroundColor(.white)
                 .frame(width: 56, height: 56)
-                .background(showCrowdInfo ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306)) // #DB284E
+                .background(Color.green)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
         }
-        .padding(.leading, 42)
     }
     
-    // Add this new computed property for the map navigation button
-    private var mapNavigationButton: some View {
-        ZStack {
-            // Main map button (always stays in the same position)
-            Button(action: {
-                showMapOptions.toggle()
-            }) {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 56, height: 56)
-                    .background(showMapOptions ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306)) // Darker when active
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-            }
-            
-            // Options panel (positioned absolutely above the main button)
-            if showMapOptions {
-                VStack(spacing: 8) {
-                    mapOptionButton(title: "Hall C", action: { switchToHall(.hallC) })
-                    mapOptionButton(title: "Hall B", action: { switchToHall(.hallB) })
-                    mapOptionButton(title: "Hall A", action: { switchToHall(.hallA) })
-                    mapOptionButton(title: "Fit to Screen", action: { switchToHall(.none) })
+    // Update the route selector component
+    private var routeSelector: some View {
+        VStack(spacing: 0) {
+            // Starting point field
+            HStack(spacing: 12) {
+                Circle()
+                    .stroke(Color(red: 0.859, green: 0.157, blue: 0.306), lineWidth: 2)
+                    .fill(Color.clear)
+                    .frame(width: 12, height: 12)
+                
+                Button(action: {
+                    routeSelectorMode = .start
+                    isSelectingStartPoint = true
+                    showBoothList = true
+                }) {
+                    HStack {
+                        Text(startPointText)
+                            .font(.system(size: 16))
+                            .foregroundColor(startPointColor)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 16)
+                    .background(Color.white)
+                    .cornerRadius(8)
                 }
-                .padding(12)
-                .frame(width: 120) // Fixed width to prevent expansion
-                .background(Color(red: 0.859, green: 0.157, blue: 0.306)) // #DB284E
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
-                .position(x: 60, y: -100) // Absolute positioning relative to the button
-            }
-        }
-        .frame(width: 120, height: 56)
-        .padding(.trailing, 12)// Fixed frame size
-    }
-    
-    // Add this helper function for individual option buttons
-    private func mapOptionButton(title: String, action: @escaping () -> Void) -> some View {
-        Button(action: {
-            action()
-            showMapOptions = false
-        }) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity) // This will work within the fixed container width
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.2))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-    }
-    
-    private var mapContent: some View {
-        ZStack {
-            MapGridComponent(
-                pathfinding: pathfinding,
-                gridSize: gridSize,
-                totalMapWidth: totalMapWidth,
-                totalMapHeight: totalMapHeight,
-                zoomedSection: zoomedSection
-            )
-            
-            if !pathfinding.currentPath.isEmpty {
-                PathVisualizationComponent(
-                    pathfinding: pathfinding,
-                    gridSize: gridSize,
-                    completedPathIndices: completedPathIndices,
-                    onCheckpointTap: handleCheckpointTap
-                )
+                .buttonStyle(PlainButtonStyle())
             }
             
-            StartPointOverlayComponent(
-                allWalkablePositions: getAllWalkablePositions(),
-                gridSize: gridSize,
-                showStartPoints: pathfinding.endPoint != nil && pathfinding.startPoint == nil,
-                onStartPointTap: { pathfinding.setStartPoint($0) }
-            )
+            Divider()
+                .padding(.vertical, 12)
             
-            BoothsOverlayComponent(
-                booths: filteredBooths,
-                gridSize: gridSize,
-                totalMapWidth: totalMapWidth,
-                totalMapHeight: totalMapHeight,
-                selectedCategory: selectedCategory,
-                selectedBoothForDestination: selectedBoothForDestination,
-                zoomedSection: zoomedSection,
-                onBoothTap: handleBoothTap
-            )
-            
-            // Show CCTV overlay only when crowd info is toggled on
-            if showCrowdInfo {
-                CCTVOverlayComponent(
-                    cctvs: crowdData.cctvs,
-                    gridSize: gridSize
-                )
+            // Destination field
+            HStack(spacing: 12) {
+                Image(systemName: "location.fill")
+                    .foregroundColor(Color(red: 0.859, green: 0.157, blue: 0.306))
+                    .frame(width: 12, height: 12)
+                
+                Button(action: {
+                    routeSelectorMode = .destination
+                    isSelectingStartPoint = false
+                    showBoothList = true
+                }) {
+                    HStack {
+                        Text(destinationText)
+                            .font(.system(size: 16))
+                            .foregroundColor(destinationColor)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 16)
+                    .background(Color.white)
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            
-            PathfindingMarkersComponent(
-                startPoint: pathfinding.startPoint,
-                endPoint: pathfinding.endPoint,
-                gridSize: gridSize
-            )
-            
-            HallLabelsComponent(
-                hallConfigs: pathfinding.getAllHallConfigs(),
-                gridSize: gridSize,
-                totalMapWidth: totalMapWidth,
-                shouldShowHall: { _ in true }
-            )
         }
-        .frame(width: CGFloat(totalMapWidth) * gridSize, 
-               height: CGFloat(totalMapHeight) * gridSize)
+        .padding()
+        .background(Color.white)
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+        .padding(.top, 24)
+        .padding(.horizontal, 56)
     }
     
-    private var currentScale: CGFloat {
-        if case .none = zoomedSection {
-            return scale
+    // Helper computed properties for route selector text and colors
+    private var startPointText: String {
+        if let startPoint = pathfinding.startPoint {
+            return "Starting from (\(startPoint.x), \(startPoint.y))"
         } else {
-            return scale * 1.5
+            return "Tulis Brand di Sekitarmu"
         }
     }
     
-    private var currentOffset: CGSize {
-        if case .none = zoomedSection {
-            return CGSize(width: lastOffset.width + offset.width, 
-                         height: lastOffset.height + offset.height)
+    private var startPointColor: Color {
+        return pathfinding.startPoint != nil ? .primary : .gray
+    }
+    
+    private var destinationText: String {
+        if let endPoint = pathfinding.endPoint,
+           let booth = findBoothNearPosition(endPoint) {
+            return booth.name
         } else {
-            let yOffset: CGFloat = {
-                switch zoomedSection {
-                case .hallC: return 150
-                case .hallB: return 0
-                case .hallA: return -150
-                default: return 0
-                }
-            }()
-            return CGSize(width: lastOffset.width + offset.width, 
-                         height: lastOffset.height + offset.height + yOffset)
+            return "Tulis Brand Incaranmu"
         }
     }
     
-    private var mapGestures: some Gesture {
-        SimultaneousGesture(
-            MagnificationGesture()
-                .onChanged { value in
-                    scale = max(0.5, min(3.0, value))
-                },
-            
-            DragGesture()
-                .onChanged { value in
-                    offset = value.translation
-                }
-                .onEnded { value in
-                    lastOffset.width += offset.width
-                    lastOffset.height += offset.height
-                    offset = .zero
-                }
-        )
+    private var destinationColor: Color {
+        return pathfinding.endPoint != nil ? .primary : .gray
     }
     
+    // Helper function to find booth near a position (for display purposes)
+    private func findBoothNearPosition(_ position: GridPosition) -> Booth? {
+        return crowdData.getBooths().first { booth in
+            let adjacentPositions = pathfinding.getAdjacentPathPositions(for: booth)
+            return adjacentPositions.contains(position)
+        }
+    }
+    
+    // Updated function to handle route selection
+    private func handleRouteSelection(_ booth: Booth) {
+        switch routeSelectorMode {
+        case .start:
+            // For starting point, find the closest adjacent position to the booth
+            let adjacentPositions = pathfinding.getAdjacentPathPositions(for: booth)
+            if let firstPosition = adjacentPositions.first {
+                pathfinding.setStartPoint(firstPosition)
+                isSelectingStartPoint = false // Clear the selection mode
+            }
+        case .destination:
+            // For destination, use existing booth selection logic
+            pathfinding.selectBoothAsDestination(booth)
+            selectedBoothForDestination = booth
+        }
+    }
+    
+    // Update the handleBoothTap function to properly handle the flow
     private func handleBoothTap(_ booth: Booth) {
-        pathfinding.clearPath()
-        completedPathIndices.removeAll()
-        selectedBoothForDestination = booth
-        showBoothDetails = true
-    }
-    
-    private func handleCheckpointTap(at index: Int) {
-        let isLastCheckpoint = index == pathfinding.currentPath.count - 1
-        
-        if isLastCheckpoint {
-            withAnimation(.easeInOut(duration: 0.5)) {
-                pathfinding.clearPath()
-                completedPathIndices.removeAll()
-                selectedBoothForDestination = nil
+        if isSelectingStartPoint {
+            // Handle start point selection
+            let adjacentPositions = pathfinding.getAdjacentPathPositions(for: booth)
+            if let firstPosition = adjacentPositions.first {
+                pathfinding.setStartPoint(firstPosition)
+                isSelectingStartPoint = false // Clear the selection mode
             }
+        } else if pathfinding.startPoint != nil && pathfinding.endPoint == nil {
+            // If we have a start point but no destination, allow setting destination
+            pathfinding.selectBoothAsDestination(booth)
+            selectedBoothForDestination = booth
         } else {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                for i in 0..<index {
-                    completedPathIndices.insert(i)
-                }
-            }
+            // Handle normal booth selection (destination or details)
+            pathfinding.clearPath()
+            completedPathIndices.removeAll()
+            selectedBoothForDestination = booth
+            showBoothDetails = true
         }
     }
     
@@ -964,28 +963,56 @@ struct EventMapView: View {
     
     private var pathfindingInstructions: some View {
         VStack(spacing: 8) {
-            if pathfinding.endPoint == nil {
+            if pathfinding.endPoint == nil && pathfinding.startPoint == nil {
                 HStack {
                     Image(systemName: "1.circle.fill")
                         .foregroundColor(.red)
-                    Text("Tap any booth to see details and set as destination")
+                    Text("Select your starting point and destination")
                         .font(.subheadline)
                         .foregroundColor(.primary)
                 }
-            } else if pathfinding.startPoint == nil {
+            } else if pathfinding.startPoint != nil && pathfinding.endPoint == nil {
                 HStack {
                     Image(systemName: "2.circle.fill")
-                        .foregroundColor(.green)
-                    Text("Tap a green circle on any pathway to set your starting point")
+                        .foregroundColor(.orange)
+                    Text("Now tap any booth on the map or use the route selector to choose your destination")
                         .font(.subheadline)
                         .foregroundColor(.primary)
                 }
-            } else {
+            } else if pathfinding.endPoint != nil && pathfinding.startPoint == nil {
+                HStack {
+                    Image(systemName: "2.circle.fill")
+                        .foregroundColor(.orange)
+                    Text("Select your starting point using the route selector above")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
+            } else if !isNavigationActive {
                 VStack(spacing: 4) {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                         Text("Route calculated!")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .fontWeight(.medium)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "play.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Tap the green play button to start navigation")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } else {
+                VStack(spacing: 4) {
+                    HStack {
+                        Image(systemName: "location.fill")
+                            .foregroundColor(.blue)
+                        Text("Navigation active!")
                             .font(.subheadline)
                             .foregroundColor(.primary)
                             .fontWeight(.medium)
@@ -1039,11 +1066,22 @@ struct EventMapView: View {
 
 struct BoothListSheet: View {
     let booths: [Booth]
+    let mode: EventMapView.RouteSelectorMode
     let onBoothSelected: (Booth) -> Void
     
     @State private var searchText = ""
     @State private var selectedCategory: BoothCategory? = nil
     @Environment(\.dismiss) private var dismiss
+    
+    // Computed property for dynamic title
+    private var sheetTitle: String {
+        switch mode {
+        case .start:
+            return "Lagi Dimana?"
+        case .destination:
+            return "Mau Kemana?"
+        }
+    }
     
     var body: some View {
         NavigationView {
@@ -1052,13 +1090,10 @@ struct BoothListSheet: View {
                 categoryFilterSection
                 boothListSection
             }
-            .navigationTitle("Mau kemana?")
+            .navigationTitle(sheetTitle)
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+            .navigationBarHidden(false)
+            // Remove .presentationDragIndicator(.visible) from here
         }
     }
     
@@ -1238,6 +1273,210 @@ struct BoothListSheet: View {
         case .makeup: return .red
         case .perfume: return .mint
         case .skincare: return .cyan
+        }
+    }
+}
+
+extension EventMapView {
+    
+    // Missing computed properties for map interaction
+    private var currentScale: CGFloat {
+        scale
+    }
+    
+    private var currentOffset: CGSize {
+        offset
+    }
+    
+    // Missing map content computed property
+    private var mapContent: some View {
+        ZStack {
+            MapGridComponent(
+                pathfinding: pathfinding,
+                gridSize: gridSize,
+                totalMapWidth: totalMapWidth,
+                totalMapHeight: totalMapHeight,
+                zoomedSection: zoomedSection
+            )
+            
+            if !pathfinding.currentPath.isEmpty {
+                PathVisualizationComponent(
+                    pathfinding: pathfinding,
+                    gridSize: gridSize,
+                    completedPathIndices: completedPathIndices,
+                    isNavigationActive: isNavigationActive,
+                    onCheckpointTap: handleCheckpointTap
+                )
+            }
+            
+            StartPointOverlayComponent(
+                allWalkablePositions: getAllWalkablePositions(),
+                gridSize: gridSize,
+                showStartPoints: pathfinding.endPoint != nil && pathfinding.startPoint == nil,
+                onStartPointTap: { pathfinding.setStartPoint($0) }
+            )
+            
+            BoothsOverlayComponent(
+                booths: filteredBooths,
+                gridSize: gridSize,
+                totalMapWidth: totalMapWidth,
+                totalMapHeight: totalMapHeight,
+                selectedCategory: selectedCategory,
+                selectedBoothForDestination: selectedBoothForDestination,
+                zoomedSection: zoomedSection,
+                isNavigationActive: isNavigationActive,
+                isSelectingStartPoint: isSelectingStartPoint,
+                pathfinding: pathfinding, // Pass the pathfinding object
+                onBoothTap: handleBoothTap
+            )
+            
+            // Show CCTV overlay only when crowd info is toggled on
+            if showCrowdInfo {
+                CCTVOverlayComponent(
+                    cctvs: crowdData.cctvs,
+                    gridSize: gridSize
+                )
+            }
+            
+            PathfindingMarkersComponent(
+                startPoint: pathfinding.startPoint,
+                endPoint: pathfinding.endPoint,
+                gridSize: gridSize
+            )
+            
+            HallLabelsComponent(
+                hallConfigs: pathfinding.getAllHallConfigs(),
+                gridSize: gridSize,
+                totalMapWidth: totalMapWidth,
+                shouldShowHall: { _ in true }
+            )
+        }
+        .frame(width: CGFloat(totalMapWidth) * gridSize, 
+               height: CGFloat(totalMapHeight) * gridSize)
+    }
+    
+    // Update the endNavigation function to reset navigation state
+    private func endNavigation() {
+        // Clear the path and reset navigation state
+        pathfinding.clearPath()
+        completedPathIndices.removeAll()
+        isNavigationActive = false // Reset navigation state
+        
+        // Optionally show a completion message or perform other cleanup
+        print("🎉 Navigation completed successfully!")
+    }
+    
+    // Missing map gestures
+    private var mapGestures: some Gesture {
+        SimultaneousGesture(
+            // Pan gesture
+            DragGesture()
+                .onChanged { value in
+                    offset = CGSize(
+                        width: lastOffset.width + value.translation.width,
+                        height: lastOffset.height + value.translation.height
+                    )
+                }
+                .onEnded { _ in
+                    lastOffset = offset
+                },
+            
+            // Magnification gesture
+            MagnificationGesture()
+                .onChanged { value in
+                    scale = value
+                }
+                .onEnded { value in
+                    scale = max(0.5, min(3.0, value))
+                }
+        )
+    }
+    
+    // Missing checkpoint tap handler
+    private func handleCheckpointTap(_ pathIndex: Int) {
+        if completedPathIndices.contains(pathIndex) {
+            // If already completed, remove it and all subsequent checkpoints
+            completedPathIndices = Set(completedPathIndices.filter { $0 < pathIndex })
+        } else {
+            // Mark this checkpoint and all previous ones as completed
+            for index in 0...pathIndex {
+                completedPathIndices.insert(index)
+            }
+            
+            // Check if this is the final checkpoint (last node in path)
+            if pathIndex == pathfinding.currentPath.count - 1 {
+                // End the navigation
+                withAnimation(.easeInOut) {
+                    endNavigation()
+                }
+            }
+        }
+    }
+    
+    // Missing crowd info button
+    private var crowdInfoButton: some View {
+        Button(action: {
+            showCrowdInfo.toggle()
+        }) {
+            Image(systemName: "person.3.fill")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: 56, height: 56)
+                .background(showCrowdInfo ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+        }
+    }
+    
+    // Missing map navigation button
+    private var mapNavigationButton: some View {
+        ZStack {
+            // Main map button
+            Button(action: {
+                showMapOptions.toggle()
+            }) {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(showMapOptions ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+            }
+            
+            // Options panel
+            if showMapOptions {
+                VStack(spacing: 8) {
+                    mapOptionButton(title: "Hall C", action: { switchToHall(.hallC) })
+                    mapOptionButton(title: "Hall B", action: { switchToHall(.hallB) })
+                    mapOptionButton(title: "Hall A", action: { switchToHall(.hallA) })
+                    mapOptionButton(title: "Fit to Screen", action: { switchToHall(.none) })
+                }
+                .padding(12)
+                .frame(width: 120)
+                .background(Color(red: 0.859, green: 0.157, blue: 0.306))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                .position(x: 60, y: -100)
+            }
+        }
+        .frame(width: 120, height: 56)
+    }
+    
+    // Missing map option button helper
+    private func mapOptionButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            action()
+            showMapOptions = false
+        }) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
     }
 }
