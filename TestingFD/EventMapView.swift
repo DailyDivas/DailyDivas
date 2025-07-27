@@ -1121,7 +1121,8 @@ struct EventMapView: View {
         .background(.regularMaterial)
         .cornerRadius(12)
         .shadow(radius: 3)
-        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.horizontal, 64)
     }
     
     // Add helper function to get active (not completed) directions
