@@ -500,6 +500,8 @@ struct EventMapView: View {
     @State private var selectedBoothForDestination: Booth? = nil
     @State private var showBoothDetails = false
     @State private var completedPathIndices: Set<Int> = []
+    @State private var showMapOptions = false // Add this new state
+    @State private var showCrowdInfo = false // Add this new state for crowd button
 
     private let gridSize: CGFloat = 40
     private let totalMapWidth: Int = 12
@@ -513,40 +515,110 @@ struct EventMapView: View {
                 .gesture(mapGestures)
             
             VStack {
-                HStack {
-                    hallSelector
-                    Spacer()
-                    categoryFilterButton
-                }
-                .padding(.horizontal, 16) // Increase padding to push buttons away from edges
-                
                 if showBoothDetails, let selectedBooth = selectedBoothForDestination {
                     boothDetailsPanel(for: selectedBooth)
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 16) // Keep 16 for panels
+                        .padding(.horizontal, 16)
                 }
                 
                 if pathfinding.endPoint != nil || pathfinding.startPoint != nil {
                     pathfindingInstructions
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 4) // Keep 16 for panels
+                        .padding(.horizontal, 4)
                 }
                 
                 if showCategoryFilter {
                     categoryFilterPanel
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                        .padding(.horizontal, 16) // Keep 16 for panels
+                        .padding(.horizontal, 16)
                 }
                 
                 Spacer()
-                
-                if case .none = zoomedSection {
-                    mapControlPanel
+            }
+            .padding(.vertical, 8)
+            
+            // Add both navigation buttons
+            VStack {
+                Spacer()
+                HStack {
+                    crowdInfoButton
+                    Spacer()
+                    mapNavigationButton
                 }
             }
-            .padding(.vertical, 8) // Only vertical padding for the main VStack
+            .padding(.horizontal, 20)
+            .padding(.bottom, 40)
         }
         .background(Color(.systemGroupedBackground))
+    }
+    
+    // Add this new computed property for the crowd info button
+    private var crowdInfoButton: some View {
+        Button(action: {
+            showCrowdInfo.toggle()
+        }) {
+            Image(systemName: "person.3.fill")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundColor(.white)
+                .frame(width: 56, height: 56)
+                .background(showCrowdInfo ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306)) // #DB284E
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+        }
+        .padding(.leading, 42)
+    }
+    
+    // Add this new computed property for the map navigation button
+    private var mapNavigationButton: some View {
+        ZStack {
+            // Main map button (always stays in the same position)
+            Button(action: {
+                showMapOptions.toggle()
+            }) {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(showMapOptions ? Color(red: 0.7, green: 0.1, blue: 0.25) : Color(red: 0.859, green: 0.157, blue: 0.306)) // Darker when active
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+            }
+            
+            // Options panel (positioned absolutely above the main button)
+            if showMapOptions {
+                VStack(spacing: 8) {
+                    mapOptionButton(title: "Hall C", action: { switchToHall(.hallC) })
+                    mapOptionButton(title: "Hall B", action: { switchToHall(.hallB) })
+                    mapOptionButton(title: "Hall A", action: { switchToHall(.hallA) })
+                    mapOptionButton(title: "Fit to Screen", action: { switchToHall(.none) })
+                }
+                .padding(12)
+                .frame(width: 120) // Fixed width to prevent expansion
+                .background(Color(red: 0.859, green: 0.157, blue: 0.306)) // #DB284E
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                .position(x: 60, y: -100) // Absolute positioning relative to the button
+            }
+        }
+        .frame(width: 120, height: 56)
+        .padding(.trailing, 12)// Fixed frame size
+    }
+    
+    // Add this helper function for individual option buttons
+    private func mapOptionButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            action()
+            showMapOptions = false
+        }) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity) // This will work within the fixed container width
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
     }
     
     private var mapContent: some View {
@@ -586,10 +658,13 @@ struct EventMapView: View {
                 onBoothTap: handleBoothTap
             )
             
-            CCTVOverlayComponent(
-                cctvs: crowdData.cctvs,
-                gridSize: gridSize
-            )
+            // Show CCTV overlay only when crowd info is toggled on
+            if showCrowdInfo {
+                CCTVOverlayComponent(
+                    cctvs: crowdData.cctvs,
+                    gridSize: gridSize
+                )
+            }
             
             PathfindingMarkersComponent(
                 startPoint: pathfinding.startPoint,
@@ -698,72 +773,38 @@ struct EventMapView: View {
         return walkablePositions
     }
     
-    private var hallSelector: some View {
-        Menu {
-            ForEach(ZoomSection.allCases, id: \.self) { section in
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        if section == .none {
-                            scale = 1.0
-                            lastOffset = .zero
-                            offset = .zero
-                            zoomedSection = .none
-                        } else {
-                            lastOffset = .zero
-                            offset = .zero
-                            zoomedSection = section
-                        }
-                    }
-                }) {
-                    HStack {
-                        Text(section.title)
-                        if zoomedSection == section {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+    private func switchToHall(_ section: ZoomSection) {
+        withAnimation(.easeInOut(duration: 0.5)) {
+            if section == .none {
+                scale = 1.0
+                lastOffset = .zero
+                offset = .zero
+                zoomedSection = .none
+            } else {
+                lastOffset = .zero
+                offset = .zero
+                zoomedSection = section
             }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "building.2")
-                    .font(.system(size: 18))
-                Text(zoomedSection.title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
-            .padding(.horizontal, 12) // Reduced from 16 to 12
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
-            .cornerRadius(20)
-            .shadow(radius: 3)
         }
-        .padding(.leading, 56)
-        .padding(.top, 56)
     }
     
-    private var categoryFilterButton: some View {
-        Button(action: {
-            withAnimation(.easeInOut) {
-                showCategoryFilter.toggle()
-            }
-        }) {
-            HStack(spacing: 8) {
-                Image(systemName: "line.horizontal.3.decrease.circle")
-                    .font(.system(size: 18))
-                Text("Filter")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-            }
-            .padding(.horizontal,16) // Reduced from 16 to 12
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
-            .cornerRadius(20)
-            .shadow(radius: 3)
+    private func toggleCategoryFilter() {
+        withAnimation(.easeInOut) {
+            showCategoryFilter.toggle()
         }
-        .padding(.trailing, 56)
-        .padding(.top, 56)
     }
-
+    
+    private func analyzeCurrentPath() {
+        print("🔍 Current Path Analysis:")
+        print(pathfinding.analyzePath())
+        
+        let highCrowdAreas = crowdData.cctvs.filter { $0.peopleCount > 15 }
+        print("📊 High crowd areas (>15 people):")
+        for cctv in highCrowdAreas {
+            print("  \(cctv.name): \(cctv.peopleCount) people at (\(cctv.position.x), \(cctv.position.y))")
+        }
+    }
+    
     private var categoryFilterPanel: some View {
         VStack(spacing: 12) {
             HStack {
@@ -940,47 +981,6 @@ struct EventMapView: View {
         .padding(.horizontal, 56)
     }
     
-    private var mapControlPanel: some View {
-        HStack(spacing: 16) {
-            Button(action: resetMapPosition) { 
-                Image(systemName: "house.fill")
-                    .font(.system(size: 18))
-            }
-            
-            Button(action: zoomOut) { 
-                Image(systemName: "minus.magnifyingglass")
-                    .font(.system(size: 18))
-            }
-            
-            Button(action: zoomIn) { 
-                Image(systemName: "plus.magnifyingglass")
-                    .font(.system(size: 18))
-            }
-            
-            Button(action: {
-                print("🔍 Current Path Analysis:")
-                print(pathfinding.analyzePath())
-                
-                let highCrowdAreas = crowdData.cctvs.filter { $0.peopleCount > 15 }
-                print("📊 High crowd areas (>15 people):")
-                for cctv in highCrowdAreas {
-                    print("  \(cctv.name): \(cctv.peopleCount) people at (\(cctv.position.x), \(cctv.position.y))")
-                }
-            }) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 18))
-            }
-            .tint(.orange)
-        }
-        .buttonStyle(.bordered)
-        .tint(.secondary)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.thinMaterial)
-        .cornerRadius(20)
-        .shadow(radius: 3)
-    }
-    
     private func resetMapPosition() {
         withAnimation(.easeInOut) {
             scale = 1.0
@@ -1001,4 +1001,8 @@ struct EventMapView: View {
             scale = max(0.5, scale / 1.3)
         }
     }
+}
+
+#Preview {
+    ContentView()
 }
