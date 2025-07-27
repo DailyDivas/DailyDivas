@@ -502,6 +502,7 @@ struct EventMapView: View {
     @State private var completedPathIndices: Set<Int> = []
     @State private var showMapOptions = false // Add this new state
     @State private var showCrowdInfo = false // Add this new state for crowd button
+    @State private var showBoothList = false // Add this new state for booth list sheet
 
     private let gridSize: CGFloat = 40
     private let totalMapWidth: Int = 12
@@ -515,6 +516,24 @@ struct EventMapView: View {
                 .gesture(mapGestures)
             
             VStack {
+                // Add search button at the top
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        showBoothList = true
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color(red: 0.859, green: 0.157, blue: 0.306))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                
                 if showBoothDetails, let selectedBooth = selectedBoothForDestination {
                     boothDetailsPanel(for: selectedBooth)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -550,6 +569,15 @@ struct EventMapView: View {
             .padding(.bottom, 40)
         }
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $showBoothList) {
+            BoothListSheet(
+                booths: crowdData.getBooths(),
+                onBoothSelected: { booth in
+                    showBoothList = false
+                    handleBoothTap(booth)
+                }
+            )
+        }
     }
     
     // Add this new computed property for the crowd info button
@@ -1005,4 +1033,211 @@ struct EventMapView: View {
 
 #Preview {
     ContentView()
+}
+
+// Add this new component before the main EventMapView struct
+
+struct BoothListSheet: View {
+    let booths: [Booth]
+    let onBoothSelected: (Booth) -> Void
+    
+    @State private var searchText = ""
+    @State private var selectedCategory: BoothCategory? = nil
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                searchBarSection
+                categoryFilterSection
+                boothListSection
+            }
+            .navigationTitle("Mau kemana?")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+    
+    // Break down the search bar into a separate computed property
+    private var searchBarSection: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+            
+            TextField("Tuliskan nama brand", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+        }
+        .padding()
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(10)
+        .padding(.horizontal)
+        .padding(.top)
+    }
+    
+    // Break down the category filters into a separate computed property
+    private var categoryFilterSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                allCategoryButton
+                
+                ForEach(BoothCategory.allCases, id: \.self) { category in
+                    categoryButton(for: category)
+                }
+            }
+            .padding(.horizontal)
+        }
+        .padding(.vertical)
+    }
+    
+    private var allCategoryButton: some View {
+        Button(action: {
+            selectedCategory = nil
+        }) {
+            Text("All")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(selectedCategory == nil ? .white : .primary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(selectedCategory == nil ? Color(red: 0.859, green: 0.157, blue: 0.306) : Color.gray.opacity(0.2))
+                .clipShape(Capsule())
+        }
+    }
+    
+    private func categoryButton(for category: BoothCategory) -> some View {
+        let isSelected = selectedCategory == category
+        
+        return Button(action: {
+            selectedCategory = selectedCategory == category ? nil : category
+        }) {
+            Text(category.rawValue.capitalized)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isSelected ? .white : .primary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(isSelected ? Color(red: 0.859, green: 0.157, blue: 0.306) : Color.gray.opacity(0.2))
+                .clipShape(Capsule())
+        }
+    }
+    
+    // Break down the booth list into a separate computed property
+    private var boothListSection: some View {
+        List {
+            ForEach(groupedBooths.keys.sorted(), id: \.self) { letter in
+                Section {
+                    ForEach(Array(groupedBooths[letter, default: []].enumerated()), id: \.offset) { index, booth in
+                        boothRow(for: booth, at: index, letter: letter)
+                    }
+                }
+            }
+        }
+        .listStyle(PlainListStyle())
+    }
+    
+    private func boothRow(for booth: Booth, at index: Int, letter: String) -> some View {
+        HStack(spacing: 12) {
+            // Show letter only for the first booth in each section
+            if index == 0 {
+                Text(letter)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(Color(red: 0.859, green: 0.157, blue: 0.306))
+                    .frame(width: 30, alignment: .center)
+            } else {
+                // Empty space to align with other entries
+                Spacer()
+                    .frame(width: 30)
+            }
+            
+            // Booth content
+            Button(action: {
+                onBoothSelected(booth)
+            }) {
+                boothContent(for: booth)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+    }
+    
+    private func boothContent(for booth: Booth) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(booth.name)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                
+                categoryIndicators(for: booth)
+            }
+            
+            Spacer()
+            
+            Text(booth.hall.rawValue)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 8)
+    }
+    
+    private func categoryIndicators(for booth: Booth) -> some View {
+        HStack(spacing: 8) {
+            if !booth.categories.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(booth.categories.prefix(2), id: \.self) { category in
+                        Circle()
+                            .fill(categoryColor(for: category))
+                            .frame(width: 8, height: 8)
+                    }
+                    if booth.categories.count > 2 {
+                        Text("+\(booth.categories.count - 2)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            Spacer()
+        }
+    }
+    
+    private var filteredBooths: [Booth] {
+        let categoryFiltered: [Booth]
+        if let selectedCategory = selectedCategory {
+            categoryFiltered = booths.filter { $0.categories.contains(selectedCategory) }
+        } else {
+            categoryFiltered = booths
+        }
+        
+        if searchText.isEmpty {
+            return categoryFiltered
+        } else {
+            return categoryFiltered.filter { booth in
+                let words = booth.name.components(separatedBy: CharacterSet.whitespacesAndNewlines)
+                return words.contains { word in
+                    word.lowercased().hasPrefix(searchText.lowercased())
+                }
+            }
+        }
+    }
+    
+    private var groupedBooths: [String: [Booth]] {
+        Dictionary(grouping: filteredBooths) { booth in
+            String(booth.name.prefix(1).uppercased())
+        }
+    }
+    
+    private func categoryColor(for category: BoothCategory) -> Color {
+        switch category {
+        case .bodycare: return .purple
+        case .haircare: return .brown
+        case .lipcare: return .pink
+        case .makeup: return .red
+        case .perfume: return .mint
+        case .skincare: return .cyan
+        }
+    }
 }
